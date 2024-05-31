@@ -1,0 +1,10 @@
+[package]
+name = "libra-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ff = "0.13.0"
+rand = "0.8.5"
+itertools = "0.13.0"
+halo2curves = "0.6.1"
