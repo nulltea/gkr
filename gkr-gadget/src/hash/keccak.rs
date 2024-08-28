@@ -178,7 +178,7 @@ impl KeccakPerm {
             ]
             .into_iter()
             .flat_map(|(lhs, rhs)| not_lhs_and_rhs_gates(words[lhs], words[rhs]))
-            .collect();
+            .collect_vec();
             VanillaNode::new(1, Self::LOG2_STATE_SIZE, gates, self.num_reps)
         };
         let n_1 = {
@@ -186,7 +186,7 @@ impl KeccakPerm {
                 xor_with_rc_gates(words[0], WordIdx::new(0).input(1), rc),
                 (1..25).flat_map(|idx| xor_gates(words[idx], WordIdx::new(idx).input(1)))
             ]
-            .collect();
+            .collect_vec();
             VanillaNode::new(2, Self::LOG2_STATE_SIZE, gates, self.num_reps)
         };
 
@@ -409,9 +409,13 @@ pub mod dev {
             })
             .collect_vec();
 
+        println!("states values {}", states.len());
+
         let state_primes = izip!(&states, &inputs)
             .map(|(state, input)| from_fn(|idx| state[idx] ^ input.get(idx).unwrap_or(&0)))
             .collect_vec();
+
+        println!("state_primes values {}", state_primes.len());
 
         let m = [(); 1 << 12].map(|_| AtomicU64::new(0));
         m[0].store(24 << log2_size, Relaxed);
@@ -429,6 +433,25 @@ pub mod dev {
                 (interms.into_iter().flatten().collect_vec(), fs)
             })
             .unzip::<_, _, Vec<_>, Vec<_>>();
+
+        let bins2 = chain_par![
+            [states.clone(), inputs.clone(), state_primes.clone()].map(|values| {
+                values
+                    .into_iter()
+                    .flat_map(|value| chain![value, [0; 7]])
+                    .collect()
+            }),
+            (0..72).into_par_iter().map(|idx| {
+                interms
+                    .iter()
+                    .flat_map(|interms| chain![interms[idx], [0; 7]])
+                    .collect::<Vec<_>>()
+            })
+        ]
+        .map(|value| value);
+
+        let x: Vec<_> = bins2.collect();
+        println!("bins values {} bins[0] {}", x.len(), x[0].len());
 
         let bins = chain_par![
             [states, inputs, state_primes].map(|values| {
@@ -579,7 +602,7 @@ pub mod test {
     #[test]
     fn keccak256() {
         let mut rng = seeded_std_rng();
-        for num_reps in (0..3).map(|log2| 1 << log2) {
+        for num_reps in (0..10).map(|log2| 1 << log2) {
             run_keccak::<Goldilocks, GoldilocksExt2>(256, num_reps, &mut rng);
         }
     }
@@ -590,7 +613,8 @@ pub mod test {
         mut rng: impl RngCore,
     ) {
         let keccak = Keccak::new(num_bits, num_reps);
-        let input = rand_bytes(rand_range(0..num_reps * keccak.rate(), &mut rng), &mut rng);
+        let input = rand_bytes(num_reps * keccak.rate() - 1, &mut rng);
+        println!("input: {:?} num_reps {num_reps}", input.len());
 
         let (circuit, values) = keccak_circuit::<F, E>(keccak, &input);
         run_gkr_with_values(&circuit, &values, &mut rng);

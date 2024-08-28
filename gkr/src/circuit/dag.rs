@@ -20,7 +20,7 @@ impl<T> DirectedAcyclicGraph<T> {
         Self { nodes, edges }
     }
 
-    pub(crate) fn nodes(&self) -> &[T] {
+    pub fn nodes(&self) -> &[T] {
         &self.nodes
     }
 
@@ -32,7 +32,7 @@ impl<T> DirectedAcyclicGraph<T> {
         self.indegs().positions(|deg| deg == 0)
     }
 
-    pub(crate) fn outputs(&self) -> impl Iterator<Item = usize> + '_ {
+    pub fn outputs(&self) -> impl Iterator<Item = usize> + '_ {
         self.outdegs().positions(|deg| deg == 0)
     }
 

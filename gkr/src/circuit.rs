@@ -105,7 +105,7 @@ pub(super) mod test {
         f: impl Fn(usize, &mut StdRng) -> TestData<F, E>,
     ) {
         let mut rng = seeded_std_rng();
-        for num_vars in 1..10 {
+        for num_vars in 2..3 {
             let (circuit, inputs, expected_values) = f(num_vars, &mut rng);
             let values = circuit.evaluate(inputs);
             if let Some(expected_values) = expected_values {

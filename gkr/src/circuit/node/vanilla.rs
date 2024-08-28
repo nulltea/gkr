@@ -85,9 +85,9 @@ impl<F: Field, E: ExtensionField<F>> Node<F, E> for VanillaNode<F, E> {
     ) -> Result<Vec<Vec<EvalClaim<E>>>, Error> {
         assert_eq!(inputs.len(), self.input_arity);
 
-        if self.inputs.len() == 1 && claim.points.len() == 1 {
-            return self.prove_linear_claim_reduction(claim, inputs, transcript);
-        }
+        // if self.inputs.len() == 1 && claim.points.len() == 1 {
+        //     return self.prove_linear_claim_reduction(claim, inputs, transcript);
+        // }
 
         let eq_r_gs = self.eq_r_gs(&claim.points, &claim.alphas);
         let eq_r_g_prime = self.eq_r_g_prime(&eq_r_gs);
@@ -123,9 +123,9 @@ impl<F: Field, E: ExtensionField<F>> Node<F, E> for VanillaNode<F, E> {
         claim: CombinedEvalClaim<E>,
         transcript: &mut dyn TranscriptRead<F, E>,
     ) -> Result<Vec<Vec<EvalClaim<E>>>, Error> {
-        if self.inputs.len() == 1 && claim.points.len() == 1 {
-            return self.verify_linear_claim_reduction(claim, transcript);
-        }
+        // if self.inputs.len() == 1 && claim.points.len() == 1 {
+        //     return self.verify_linear_claim_reduction(claim, transcript);
+        // }
 
         let eq_r_gs = self.eq_r_gs(&claim.points, &claim.alphas);
 
@@ -670,14 +670,12 @@ pub mod test {
             },
             test::{run_circuit, TestData},
             Circuit,
-        },
-        poly::box_dense_poly,
-        util::{
+        }, connect, poly::box_dense_poly, util::{
             arithmetic::{ExtensionField, Field},
             chain,
             dev::{rand_bool, rand_range, rand_unique, rand_vec},
             izip, Itertools, RngCore,
-        },
+        }
     };
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use std::iter;
@@ -733,6 +731,17 @@ pub mod test {
         }
     }
 
+    
+    #[test]
+    fn cyclo_mul() {
+        run_circuit::<Goldilocks, GoldilocksExt2>(shift_circuit);
+    }
+
+    #[test]
+    fn hadamard() {
+        run_circuit::<Goldilocks, GoldilocksExt2>(hadamard_circuit);
+    }
+
     #[test]
     fn grand_product() {
         run_circuit::<Goldilocks, GoldilocksExt2>(grand_product_circuit);
@@ -751,6 +760,107 @@ pub mod test {
     #[test]
     fn rand_dag() {
         run_circuit::<Goldilocks, GoldilocksExt2>(rand_dag_circuit);
+    }
+
+    fn shift_circuit<F: Field, E: ExtensionField<F>>(
+        log2_input_size: usize,
+        rng: &mut impl RngCore,
+    ) -> TestData<F, E> {
+        let mut circuit = Circuit::default();
+        let in1 = circuit.insert(InputNode::new(log2_input_size, 1));
+        // let in2 = circuit.insert(InputNode::new(log2_input_size, 1));
+
+        let p = rand_vec((1 << log2_input_size) - 1, rng);
+
+        // Method 2 (slower on larger inputs)
+        let mul = {
+            let gates = chain![
+                // (0..1usize << log2_input_size).map(|_| VanillaGate::constant(F::ZERO)),
+                (0..p.len()).map(|i| VanillaGate::relay((0, i))),
+                (0..p.len()).map(|i| VanillaGate::relay((0, i))),
+                [VanillaGate::constant(F::ZERO)]
+            ].collect_vec();
+
+            circuit.insert(VanillaNode::new(1, log2_input_size, gates.clone(), 1))
+        };
+
+        connect!(circuit {
+            mul <- in1;
+        });
+
+
+        println!("p: {:?}", p);
+
+        let mut input = vec![F::ZERO; 1 << (log2_input_size)];
+        let mut result = vec![F::ZERO; 1 << (log2_input_size + 1)];
+
+        for i in 0..p.len() {
+            input[i] = p[i]; // P(x)
+            result[i] += p[i]; // Add P(x)
+            result[i + p.len()] += p[i]; // Add P(x) * x^N
+        }
+
+        // result[0] = F::ONE + F::ONE;
+
+        println!("input: {:?}", input);
+        println!("result: {:?}", result);
+
+        let values = [input.clone(), result]
+            .into_iter()
+            .map(box_dense_poly)
+            .collect();
+
+        (circuit, vec![box_dense_poly(input)], Some(values))
+    }
+
+    fn hadamard_circuit<F: Field, E: ExtensionField<F>>(
+        log2_input_size: usize,
+        rng: &mut impl RngCore,
+    ) -> TestData<F, E> {
+        let mut circuit = Circuit::default();
+        let in1 = circuit.insert(InputNode::new(log2_input_size, 1));
+        let in2 = circuit.insert(InputNode::new(log2_input_size, 1));
+
+        // Method 1 (more parallel but less general)
+        let mul = {
+            let gates = vec![VanillaGate::mul((0, 0), (1, 0))];
+
+            // why this works with log2_sub_input_size = 0 and num reps = 2^log2_input_size
+            circuit.insert(VanillaNode::new(2, 0, gates.clone(), 1 << log2_input_size))
+        };
+
+        // Method 2 (slower on larger inputs)
+        // let mul = {
+        //     let gates = (0..1usize << log2_input_size)
+        //         .map(|i| VanillaGate::mul((0, i), (1, i)))
+        //         .collect_vec();
+
+        //     circuit.insert(VanillaNode::new(2, log2_input_size, gates.clone(), 1))
+        // };
+
+        connect!(circuit {
+            mul <- in1, in2;
+        });
+
+        let input1 = rand_vec(1 << log2_input_size, rng);
+        let input2 = rand_vec(1 << log2_input_size, rng);
+
+        let had_prod = input1
+            .iter()
+            .zip(&input2)
+            .map(|(lhs, rhs)| *lhs * rhs)
+            .collect_vec();
+
+        let values = [input1.clone(), input2.clone(), had_prod]
+            .into_iter()
+            .map(box_dense_poly)
+            .collect();
+
+        (
+            circuit,
+            vec![box_dense_poly(input1), box_dense_poly(input2)],
+            Some(values),
+        )
     }
 
     fn grand_product_circuit<F: Field, E: ExtensionField<F>>(

@@ -49,9 +49,10 @@ pub fn rand_array<F: Field, const N: usize>(mut rng: impl RngCore) -> [F; N] {
     array::from_fn(|_| F::random(&mut rng))
 }
 
-pub fn rand_vec<F: Field>(n: usize, mut rng: impl RngCore) -> Vec<F> {
+pub fn rand_vec<F: Field>(n: usize, mut rng: &mut impl RngCore) -> Vec<F> {
     iter::repeat_with(|| F::random(&mut rng)).take(n).collect()
 }
+
 
 pub fn rand_unique<T, R>(n: usize, f: impl Fn(&mut R) -> T, mut rng: R) -> Vec<T>
 where
