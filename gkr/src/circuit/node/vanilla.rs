@@ -55,6 +55,7 @@ impl<F: Field, E: ExtensionField<F>> Node<F, E> for VanillaNode<F, E> {
         inputs: Vec<&BoxMultilinearPoly<F, E>>,
     ) -> BoxMultilinearPoly<'static, F, E> {
         assert_eq!(inputs.len(), self.input_arity);
+        println!("input size: {} inputs {:?}", self.input_size(), inputs.iter().map(|e| e.len()).collect::<Vec<_>>());
         assert!(!inputs.iter().any(|input| input.len() != self.input_size()));
 
         let output = (0..self.output_size())
@@ -872,12 +873,16 @@ pub mod test {
             [InputNode::new(log2_input_size, 1).boxed()],
             (0..log2_input_size)
                 .rev()
-                .map(|idx| VanillaNode::new(1, 1, gates.clone(), 1 << idx))
+                .map(|idx| {
+                    println!("idx v: {}", idx);
+                    VanillaNode::new(1, 1, gates.clone(), 1 << idx)
+                })
                 .map(NodeExt::boxed)
         ]
         .collect_vec();
         let circuit = Circuit::linear(nodes);
 
+        println!("log2_input_size: {}", log2_input_size);
         let input = rand_vec(1 << log2_input_size, rng);
         let succ = |input: &[_]| {
             (input.len() > 1)

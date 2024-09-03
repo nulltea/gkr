@@ -11,12 +11,15 @@ itertools = { workspace = true }
 rand_core = { workspace = true }
 rand_chacha = { workspace = true }
 rand = { workspace = true, optional = true }
+plonkish_backend = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
 criterion = { workspace = true }
 goldilocks = { workspace = true }
 halo2_curves = { workspace = true }
+num-integer = "0.1.45"
+
 
 [features]
 default = []

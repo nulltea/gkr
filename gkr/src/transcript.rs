@@ -1,3 +1,5 @@
+use plonkish_backend::util::transcript::FieldTranscript;
+
 use crate::{
     util::{
         arithmetic::{ExtensionField, PrimeField},
@@ -11,7 +13,7 @@ use std::{
     iter,
 };
 
-pub trait Transcript<F, E>: Debug {
+pub trait Transcript<F, E=F>: Debug {
     fn common_felt(&mut self, felt: &F);
 
     fn common_felts(&mut self, felts: &[F]) {
@@ -41,7 +43,7 @@ pub trait TranscriptWrite<F, E>: Transcript<F, E> {
     }
 }
 
-pub trait TranscriptRead<F, E>: Transcript<F, E> {
+pub trait TranscriptRead<F, E=F>: Transcript<F, E> {
     fn read_felt(&mut self) -> Result<F, Error>;
 
     fn read_felt_ext(&mut self) -> Result<E, Error>;

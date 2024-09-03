@@ -1,9 +1,5 @@
 [workspace]
-members = [
-    "ff-ext",
-    "gkr",
-    "gkr-gadget",
-]
+members = ["ff-ext", "gkr", "gkr-gadget"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -14,8 +10,12 @@ rand_core = "0.6.4"
 rand_chacha = "0.3.1"
 ff = "0.13.0"
 goldilocks = { git = "https://github.com/han0110/goldilocks", branch = "feature/qe_op_b" }
+plonkish_backend = { git = "https://github.com/DoHoonKim8/halo2-lasso", branch = "feature/Lasso" }
 
 # dev
 rand = "0.8.5"
 criterion = "0.5.1"
-halo2_curves = { version = "0.6.0", package = "halo2curves" }
+halo2_curves = { version = "0.6.0", package = "halo2curves", features = ["derive_serde"] }
+
+# [patch."https://github.com/DoHoonKim8/halo2-lasso"]
+# plonkish_backend = { path = "../halo2-lasso/plonkish_backend" }

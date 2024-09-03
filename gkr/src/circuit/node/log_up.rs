@@ -228,8 +228,6 @@ impl<F: Field, E: ExtensionField<F>> Node<F, E> for LogUpNode {
             };
         }
 
-        println!("LogUp layer with t size {}", t.to_dense().len());
-
         Ok(chain![
             izip!(iter::repeat(r_m_t), m_t_claims),
             izip!(iter::repeat(r_f), f_claims),

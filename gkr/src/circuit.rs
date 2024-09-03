@@ -46,11 +46,14 @@ impl<F: Field, E: ExtensionField<F>> Circuit<F, E> {
     ) -> Vec<BoxMultilinearPoly<'a, F, E>> {
         let mut values = Vec::from_iter(iter::repeat_with(|| None).take(self.nodes().len()));
 
+        println!("inputs nodes: {:?} inputs {}", self.inputs().count(), inputs.len());
+
         izip_eq!(self.inputs(), inputs).for_each(|(idx, input)| values[idx] = input.into());
         self.topo_iter()
             .filter(|(_, node)| !node.is_input())
             .for_each(|(idx, node)| {
                 let inputs = self.predec(idx).map(|i| values[i].as_ref().unwrap());
+                println!("idx: {idx}");
                 values[idx] = node.evaluate(inputs.collect()).into()
             });
 
