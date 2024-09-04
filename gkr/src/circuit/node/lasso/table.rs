@@ -1,4 +1,5 @@
 use ff_ext::{ff::PrimeField, ExtensionField};
+use plonkish_backend::poly::multilinear::MultilinearPolynomialTerms;
 
 use crate::{poly::{BoxMultilinearPoly, BoxMultilinearPolyOwned}, util::expression::Expression};
 
@@ -14,7 +15,8 @@ pub trait DecomposableTable<F: PrimeField, E: ExtensionField<F>>: std::fmt::Debu
 
     /// Returns multilinear extension polynomials of each subtable
     fn subtable_polys(&self) -> Vec<BoxMultilinearPoly<'static, F, E>>;
-    // fn subtable_polys_terms(&self) -> Vec<MultilinearPolynomialTerms<F>>;
+
+    fn subtable_polys_terms(&self) -> Vec<MultilinearPolynomialTerms<F>>;
 
     fn combine_lookup_expressions(&self, expressions: Vec<Expression<E, usize>>) -> Expression<E, usize>;
 
