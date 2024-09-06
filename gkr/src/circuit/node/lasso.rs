@@ -28,6 +28,7 @@ use std::{
     ops::Index,
     slice::Chunks,
 };
+use strum::{EnumCount, IntoEnumIterator};
 use surge::Surge;
 use table::DecomposableTable;
 // use verifier::LassoVerifier;
@@ -177,14 +178,7 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for LassoNode<F, E> {
 
         memory_checking
             .iter()
-            .map(|memory_checking| {
-                memory_checking.verify(
-                    num_vars,
-                    &gamma,
-                    &tau,
-                    transcript,
-                )
-            })
+            .map(|memory_checking| memory_checking.verify(num_vars, &gamma, &tau, transcript))
             .collect::<Result<Vec<()>, Error>>()?;
 
         Ok(chain![iter::once(vec![EvalClaim::new(r.to_vec(), claimed_sum)]),].collect_vec())
@@ -399,16 +393,92 @@ impl<F: PrimeField, E: ExtensionField<F>> LassoNode<F, E> {
     }
 }
 
-pub struct Lasso<F, E, Pcs>(PhantomData<F>, PhantomData<E>, PhantomData<Pcs>);
-
-impl<
-        F: Field + PrimeField,
-        E: ExtensionField<F>,
-        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>>,
-    > Lasso<F, E, Pcs>
+pub trait SubtableSet<F: PrimeField, E: ExtensionField<F>>:
+    DecomposableTable<F, E> + IntoEnumIterator + EnumCount + Send + Sync
 {
+    // fn enum_index(subtable: Box<dyn DecomposableTable<F, E>>) -> usize {
+    //     Self::from(subtable.subtable_id()).into()
+    // }
 }
 
+#[derive(Clone)]
+pub struct InstructionLookupsPreprocessing<F> {
+    subtable_to_memory_indices: Vec<Vec<usize>>, // Vec<Range<usize>>?
+    instruction_to_memory_indices: Vec<Vec<usize>>,
+    memory_to_subtable_index: Vec<usize>,
+    memory_to_dimension_index: Vec<usize>,
+    materialized_subtables: Vec<BoxMultilinearPoly<'static, F, E>>,
+    num_memories: usize,
+}
+
+impl<F: PrimeField> InstructionLookupsPreprocessing<F> {
+    pub fn preprocess<
+        const C: usize,
+        const M: usize,
+        InstructionSet,
+        Subtables: SubtableSet<F, E>,
+    >() -> Self {
+        let materialized_subtables = Self::materialize_subtables::<M, Subtables>();
+
+        // Build a mapping from subtable type => chunk indices that access that subtable type
+        let mut subtable_indices: Vec<SubtableIndices> =
+            vec![SubtableIndices::with_capacity(C); Subtables::COUNT];
+        for instruction in InstructionSet::iter() {
+            for (subtable, indices) in instruction.subtables::<F>(C, M) {
+                subtable_indices[Subtables::enum_index(subtable)].union_with(&indices);
+            }
+        }
+
+        let mut subtable_to_memory_indices = Vec::with_capacity(Subtables::COUNT);
+        let mut memory_to_subtable_index = vec![];
+        let mut memory_to_dimension_index = vec![];
+
+        let mut memory_index = 0;
+        for (subtable_index, dimension_indices) in subtable_indices.iter().enumerate() {
+            subtable_to_memory_indices
+                .push((memory_index..memory_index + dimension_indices.len()).collect_vec());
+            memory_to_subtable_index.extend(vec![subtable_index; dimension_indices.len()]);
+            memory_to_dimension_index.extend(dimension_indices.iter());
+            memory_index += dimension_indices.len();
+        }
+        let num_memories = memory_index;
+
+        let mut instruction_to_memory_indices = vec![vec![]; InstructionSet::COUNT];
+        for instruction in InstructionSet::iter() {
+            for (subtable, dimension_indices) in instruction.subtables::<F>(C, M) {
+                let memory_indices: Vec<_> = subtable_to_memory_indices
+                    [Subtables::enum_index(subtable)]
+                .iter()
+                .filter(|memory_index| {
+                    dimension_indices.contains(memory_to_dimension_index[**memory_index])
+                })
+                .collect();
+                instruction_to_memory_indices[InstructionSet::enum_index(&instruction)]
+                    .extend(memory_indices);
+            }
+        }
+
+        Self {
+            num_memories,
+            materialized_subtables,
+            subtable_to_memory_indices,
+            memory_to_subtable_index,
+            memory_to_dimension_index,
+            instruction_to_memory_indices,
+        }
+    }
+
+    fn materialize_subtables<const M: usize, Subtables>() -> Vec<Vec<F>>
+    where
+        Subtables: SubtableSet<F, E>,
+    {
+        let mut subtables = Vec::with_capacity(Subtables::COUNT);
+        for subtable in Subtables::iter() {
+            subtables.push(subtable.subtable_polys());
+        }
+        subtables
+    }
+}
 #[cfg(test)]
 pub mod test {
     use crate::{
@@ -417,7 +487,10 @@ pub mod test {
             test::{run_circuit, TestData},
             Circuit,
         },
-        poly::{box_dense_poly, box_owned_dense_poly, BoxMultilinearPoly, BoxMultilinearPolyOwned, MultilinearPolyTerms, PolyExpr},
+        poly::{
+            box_dense_poly, box_owned_dense_poly, BoxMultilinearPoly, BoxMultilinearPolyOwned,
+            MultilinearPolyTerms, PolyExpr,
+        },
         util::{
             arithmetic::{div_ceil, inner_product, ExtensionField, Field},
             chain,
@@ -440,6 +513,7 @@ pub mod test {
     use super::{table::DecomposableTable, Lasso, LassoNode};
     use halo2_curves::bn256;
     use rand::Rng;
+    use strum_macros::{EnumCount, EnumIter};
 
     pub type Brakedown<F> =
         MultilinearBrakedown<F, plonkish_backend::util::hash::Keccak256, BrakedownSpec6>;
@@ -557,6 +631,13 @@ pub mod test {
                 0
             }
         }
+    }
+
+    #[derive(EnumCount, EnumIter)]
+    enum RangeTables<F, E, const LIMB_BITS: usize> {
+        RangeTable16(RangeTable<F, E, 16, LIMB_BITS>),
+        RangeTable55(RangeTable<F, E, 55, LIMB_BITS>),
+        RangeTable128(RangeTable<F, E, 128, LIMB_BITS>),
     }
 
     #[test]

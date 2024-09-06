@@ -12,6 +12,8 @@ rand_core = { workspace = true }
 rand_chacha = { workspace = true }
 rand = { workspace = true, optional = true }
 plonkish_backend = { workspace = true }
+strum = "0.26.0"
+enum_dispatch = "0.3.12"
 
 [dev-dependencies]
 rand = { workspace = true }
@@ -19,7 +21,7 @@ criterion = { workspace = true }
 goldilocks = { workspace = true }
 halo2_curves = { workspace = true }
 num-integer = "0.1.45"
-
+strum_macros = "0.26.4"
 
 [features]
 default = []
