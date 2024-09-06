@@ -3,14 +3,13 @@ use std::{collections::HashMap, iter, marker::PhantomData};
 use ff_ext::{ff::PrimeField, ExtensionField};
 use itertools::{chain, izip, Itertools};
 
-use plonkish_backend::{
-    pcs::Evaluation,
-    poly::multilinear::MultilinearPolynomialTerms,
+use plonkish_backend::{pcs::Evaluation, poly::multilinear::MultilinearPolynomialTerms};
+
+use crate::{
+    circuit::node::{lasso::memory_checking::MemoryCheckingProver, DecomposableTable}, poly::{BoxMultilinearPoly, MultilinearPolyTerms}, sum_check::verify_sum_check, transcript::TranscriptRead, util::arithmetic::inner_product, Error
 };
 
-use crate::{circuit::node::{lasso::memory_checking::MemoryCheckingProver, DecomposableTable}, sum_check::verify_sum_check, transcript::TranscriptRead, Error};
-
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Chunk<F> {
     chunk_index: usize,
     chunk_bits: usize,
@@ -52,51 +51,51 @@ impl<F: PrimeField> Chunk<F> {
             .collect_vec()
     }
 
-    // pub fn verify_memories(
-    //     &self,
-    //     read_xs: &[F],
-    //     write_xs: &[F],
-    //     init_ys: &[F],
-    //     final_read_ys: &[F],
-    //     y: &[F],
-    //     hash: impl Fn(&F, &F, &F) -> F,
-    //     transcript: &mut impl FieldTranscriptRead<F>,
-    // ) -> Result<(F, F, F, Vec<F>), Error> {
-    //     let [dim_x, read_ts_poly_x, final_cts_poly_y] =
-    //         transcript.read_field_elements(3)?.try_into().unwrap();
-    //     let e_poly_xs = transcript.read_field_elements(self.num_memories())?;
-    //     let id_poly_y = inner_product(
-    //         iter::successors(Some(F::ONE), |power_of_two| Some(power_of_two.double()))
-    //             .take(y.len())
-    //             .collect_vec()
-    //             .iter(),
-    //         y,
-    //     );
-    //     self.memory.iter().enumerate().for_each(|(i, memory)| {
-    //         assert_eq!(read_xs[i], hash(&dim_x, &e_poly_xs[i], &read_ts_poly_x));
-    //         assert_eq!(
-    //             write_xs[i],
-    //             hash(&dim_x, &e_poly_xs[i], &(read_ts_poly_x + F::ONE))
-    //         );
-    //         let subtable_poly_y = memory.subtable_poly.evaluate(y);
-    //         assert_eq!(init_ys[i], hash(&id_poly_y, &subtable_poly_y, &F::ZERO));
-    //         assert_eq!(
-    //             final_read_ys[i],
-    //             hash(&id_poly_y, &subtable_poly_y, &final_cts_poly_y)
-    //         );
-    //     });
-    //     Ok((dim_x, read_ts_poly_x, final_cts_poly_y, e_poly_xs))
-    // }
+    pub fn verify_memories<E: ExtensionField<F>>(
+        &self,
+        read_xs: &[E],
+        write_xs: &[E],
+        init_ys: &[E],
+        final_read_ys: &[E],
+        y: &[E],
+        hash: impl Fn(&E, &E, &E) -> E,
+        transcript: &mut dyn TranscriptRead<F, E>,
+    ) -> Result<(E, E, E, Vec<E>), Error> {
+        let [dim_x, read_ts_poly_x, final_cts_poly_y] =
+            transcript.read_felts_as_exts(3)?.try_into().unwrap();
+        let e_poly_xs = transcript.read_felts_as_exts(self.num_memories())?;
+        let id_poly_y = inner_product(
+            iter::successors(Some(E::ONE), |power_of_two| Some(power_of_two.double()))
+                .take(y.len())
+                .collect_vec()
+                .into_iter(),
+            y.to_vec(),
+        );
+        self.memory.iter().enumerate().for_each(|(i, memory)| {
+            assert_eq!(read_xs[i], hash(&dim_x, &e_poly_xs[i], &read_ts_poly_x));
+            assert_eq!(
+                write_xs[i],
+                hash(&dim_x, &e_poly_xs[i], &(read_ts_poly_x + F::ONE))
+            );
+            let subtable_poly_y = memory.subtable_poly.evaluate(y);
+            assert_eq!(init_ys[i], hash(&id_poly_y, &subtable_poly_y, &E::ZERO));
+            assert_eq!(
+                final_read_ys[i],
+                hash(&id_poly_y, &subtable_poly_y, &final_cts_poly_y)
+            );
+        });
+        Ok((dim_x, read_ts_poly_x, final_cts_poly_y, e_poly_xs))
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Memory<F> {
     memory_index: usize,
-    subtable_poly: MultilinearPolynomialTerms<F>,
+    subtable_poly: MultilinearPolyTerms<F>,
 }
 
 impl<F> Memory<F> {
-    pub fn new(memory_index: usize, subtable_poly: MultilinearPolynomialTerms<F>) -> Self {
+    pub fn new(memory_index: usize, subtable_poly: MultilinearPolyTerms<F>) -> Self {
         Self {
             memory_index,
             subtable_poly,
@@ -104,7 +103,7 @@ impl<F> Memory<F> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MemoryCheckingVerifier<F: PrimeField, E: ExtensionField<F>> {
     /// chunks with the same bits size
     chunks: Vec<Chunk<F>>,
@@ -127,8 +126,8 @@ impl<'a, F: PrimeField, E: ExtensionField<F>> MemoryCheckingVerifier<F, E> {
         num_reads: usize,
         // polys_offset: usize,
         // points_offset: usize,
-        // gamma: &F,
-        // tau: &F,
+        gamma: &E,
+        tau: &E,
         // lookup_opening_points: &mut Vec<Vec<F>>,
         // lookup_opening_evals: &mut Vec<Evaluation<F>>,
         transcript: &mut dyn TranscriptRead<F, E>,
@@ -149,28 +148,28 @@ impl<'a, F: PrimeField, E: ExtensionField<F>> MemoryCheckingVerifier<F, E> {
         )?;
         let (init_ys, final_read_ys) = init_final_read_ys.split_at(num_memories);
 
-        // let hash = |a: &F, v: &F, t: &F| -> F { *a + *v * gamma + *t * gamma.square() - tau };
-        // let mut offset = 0;
-        // let (dim_xs, read_ts_poly_xs, final_cts_poly_ys, e_poly_xs) = self
-        //     .chunks
-        //     .iter()
-        //     .map(|chunk| {
-        //         let num_memories = chunk.num_memories();
-        //         let result = chunk.verify_memories(
-        //             &read_xs[offset..offset + num_memories],
-        //             &write_xs[offset..offset + num_memories],
-        //             &init_ys[offset..offset + num_memories],
-        //             &final_read_ys[offset..offset + num_memories],
-        //             &y,
-        //             hash,
-        //             transcript,
-        //         );
-        //         offset += num_memories;
-        //         result
-        //     })
-        //     .collect::<Result<Vec<(F, F, F, Vec<F>)>, Error>>()?
-        //     .into_iter()
-        //     .multiunzip::<(Vec<_>, Vec<_>, Vec<_>, Vec<Vec<_>>)>();
+        let hash = |a: &E, v: &E, t: &E| -> E { *a + *v * gamma + *t * gamma.square() - tau };
+        let mut offset = 0;
+        let (dim_xs, read_ts_poly_xs, final_cts_poly_ys, e_poly_xs) = self
+            .chunks
+            .iter()
+            .map(|chunk| {
+                let num_memories = chunk.num_memories();
+                let result = chunk.verify_memories(
+                    &read_xs[offset..offset + num_memories],
+                    &write_xs[offset..offset + num_memories],
+                    &init_ys[offset..offset + num_memories],
+                    &final_read_ys[offset..offset + num_memories],
+                    &y,
+                    hash,
+                    transcript,
+                );
+                offset += num_memories;
+                result
+            })
+            .collect::<Result<Vec<(E, E, E, Vec<E>)>, Error>>()?
+            .into_iter()
+            .multiunzip::<(Vec<_>, Vec<_>, Vec<_>, Vec<Vec<_>>)>();
 
         // self.opening_evals(
         //     num_chunks,
@@ -192,10 +191,10 @@ impl<'a, F: PrimeField, E: ExtensionField<F>> MemoryCheckingVerifier<F, E> {
         num_vars: usize,
         claimed_v_0s: impl IntoIterator<Item = Option<E>>,
         transcript: &mut dyn TranscriptRead<F, E>,
-    ) -> Result<(Vec<E>, Vec<E>), Error>{
+    ) -> Result<(Vec<E>, Vec<E>), Error> {
         let claimed_v_0s = claimed_v_0s.into_iter().collect_vec();
         let num_batching = claimed_v_0s.len();
-    
+
         assert!(num_batching != 0);
         let claimed_v_0s = {
             claimed_v_0s
@@ -204,100 +203,101 @@ impl<'a, F: PrimeField, E: ExtensionField<F>> MemoryCheckingVerifier<F, E> {
                     Some(claimed) => {
                         transcript.common_felts(&claimed.as_bases());
                         Ok(claimed)
-                    },
+                    }
                     None => transcript.read_felt_ext(),
                 })
                 .try_collect::<_, Vec<_>, _>()?
         };
-    
-    
-        (0..num_vars).fold(Ok((claimed_v_0s, Vec::new())), |result, num_vars| {
-            let (claimed_v_ys, y) = result?;
-    
+
+        (0..num_vars).try_fold((claimed_v_0s, Vec::new()), |result, num_vars| {
+            let (claimed_v_ys, y) = result;
+
             let (mut x, evals) = if num_vars == 0 {
                 let evals = transcript.read_felt_exts(2 * num_batching)?;
-    
                 for (claimed_v, (&v_l, &v_r)) in izip!(claimed_v_ys, evals.iter().tuples()) {
                     if claimed_v != v_l * v_r {
-                        return Err(Error::InvalidSumCheck("unmatched sum check output".to_string()));
+                        return Err(Error::InvalidSumCheck(
+                            "unmatched sum check output".to_string(),
+                        ));
                     }
                 }
-    
+
                 (Vec::new(), evals)
             } else {
                 let gamma = transcript.squeeze_challenge();
                 let g = MemoryCheckingProver::sum_check_function(num_vars, num_batching, gamma);
 
-    
-                let (x_eval, x) = {
+                let (_x_eval, x) = {
                     let claim = MemoryCheckingProver::sum_check_claim(&claimed_v_ys, gamma);
                     verify_sum_check(&g, claim, transcript)?
                 };
-    
+
                 let evals = transcript.read_felt_exts(2 * num_batching)?;
-    
+
                 // let eval_by_query = eval_by_query(&evals);
                 // if x_eval != evaluate(&expression, num_vars, &eval_by_query, &[gamma], &[&y], &x) {
                 //     return Err(Error::InvalidSumCheck("unmatched sum check output".to_string()));
                 // }
-    
+
                 (x, evals)
             };
-    
+
             let mu = transcript.squeeze_challenge();
-    
+
             let v_xs = MemoryCheckingProver::layer_down_claim(&evals, mu);
             x.push(mu);
-    
+
             Ok((v_xs, x))
         })
     }
 
-    fn opening_evals(
-        &self,
-        num_chunks: usize,
-        polys_offset: usize,
-        points_offset: usize,
-        lookup_opening_points: &Vec<Vec<F>>,
-        lookup_opening_evals: &mut Vec<Evaluation<F>>,
-        dim_xs: &[F],
-        read_ts_poly_xs: &[F],
-        final_cts_poly_ys: &[F],
-        e_poly_xs: &[F],
-    ) {
-        let x_offset = points_offset + lookup_opening_points.len();
-        let y_offset = x_offset + 1;
-        let (dim_xs, read_ts_poly_xs, final_cts_poly_ys) = self
-            .chunks
-            .iter()
-            .enumerate()
-            .map(|(i, chunk)| {
-                let chunk_polys_index = chunk.chunk_polys_index(polys_offset, num_chunks);
-                (
-                    Evaluation::new(chunk_polys_index[0], x_offset, dim_xs[i]),
-                    Evaluation::new(chunk_polys_index[1], x_offset, read_ts_poly_xs[i]),
-                    Evaluation::new(chunk_polys_index[2], y_offset, final_cts_poly_ys[i]),
-                )
-            })
-            .multiunzip::<(Vec<Evaluation<F>>, Vec<Evaluation<F>>, Vec<Evaluation<F>>)>();
+    // fn opening_evals(
+    //     &self,
+    //     num_chunks: usize,
+    //     polys_offset: usize,
+    //     points_offset: usize,
+    //     lookup_opening_points: &Vec<Vec<F>>,
+    //     lookup_opening_evals: &mut Vec<Evaluation<F>>,
+    //     dim_xs: &[F],
+    //     read_ts_poly_xs: &[F],
+    //     final_cts_poly_ys: &[F],
+    //     e_poly_xs: &[F],
+    // ) {
+    //     let x_offset = points_offset + lookup_opening_points.len();
+    //     let y_offset = x_offset + 1;
+    //     let (dim_xs, read_ts_poly_xs, final_cts_poly_ys) = self
+    //         .chunks
+    //         .iter()
+    //         .enumerate()
+    //         .map(|(i, chunk)| {
+    //             let chunk_polys_index = chunk.chunk_polys_index(polys_offset, num_chunks);
+    //             (
+    //                 Evaluation::new(chunk_polys_index[0], x_offset, dim_xs[i]),
+    //                 Evaluation::new(chunk_polys_index[1], x_offset, read_ts_poly_xs[i]),
+    //                 Evaluation::new(chunk_polys_index[2], y_offset, final_cts_poly_ys[i]),
+    //             )
+    //         })
+    //         .multiunzip::<(Vec<Evaluation<F>>, Vec<Evaluation<F>>, Vec<Evaluation<F>>)>();
 
-        let e_poly_offset = polys_offset + 1 + 3 * num_chunks;
-        let e_poly_xs = self
-            .chunks
-            .iter()
-            .flat_map(|chunk| chunk.memory_indices())
-            .zip(e_poly_xs)
-            .map(|(memory_index, &e_poly_x)| {
-                Evaluation::new(e_poly_offset + memory_index, x_offset, e_poly_x)
-            })
-            .collect_vec();
-        lookup_opening_evals.extend_from_slice(
-            &chain!(dim_xs, read_ts_poly_xs, final_cts_poly_ys, e_poly_xs).collect_vec(),
-        );
-    }
+    //     let e_poly_offset = polys_offset + 1 + 3 * num_chunks;
+    //     let e_poly_xs = self
+    //         .chunks
+    //         .iter()
+    //         .flat_map(|chunk| chunk.memory_indices())
+    //         .zip(e_poly_xs)
+    //         .map(|(memory_index, &e_poly_x)| {
+    //             Evaluation::new(e_poly_offset + memory_index, x_offset, e_poly_x)
+    //         })
+    //         .collect_vec();
+    //     lookup_opening_evals.extend_from_slice(
+    //         &chain!(dim_xs, read_ts_poly_xs, final_cts_poly_ys, e_poly_xs).collect_vec(),
+    //     );
+    // }
 }
 
-fn chunks<F: PrimeField, E: ExtensionField<F>>(table: &Box<dyn DecomposableTable<F, E>>) -> Vec<Chunk<F>> {
+fn chunks<F: PrimeField, E: ExtensionField<F>>(
+    table: &Box<dyn DecomposableTable<F, E>>,
+) -> Vec<Chunk<F>> {
     let num_memories = table.num_memories();
     let chunk_bits = table.chunk_bits();
     let subtable_polys = table.subtable_polys_terms();

@@ -12,6 +12,7 @@ use crate::{
 use ff_ext::ff::PrimeField;
 use memory_checking::{Chunk, Memory, MemoryCheckingProver};
 use plonkish_backend::{
+    backend::lookup,
     pcs::PolynomialCommitmentScheme,
     poly::multilinear::{MultilinearPolynomial, MultilinearPolynomialTerms},
     util::parallel::{num_threads, parallelize_iter},
@@ -84,12 +85,24 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for LassoNode<F, E> {
 
         let num_chunks = table.chunk_bits().len();
 
-        let (lookup_output_poly, inputs) = inputs.split_first().unwrap();
-        let (e_polys, inputs) = inputs.split_at(table.num_memories());
-        let (dims, inputs) = inputs.split_at(num_chunks);
-        let (read_ts_polys, inputs) = inputs.split_at(num_chunks);
-        let (final_cts_polys, inputs) = inputs.split_at(num_chunks);
-        assert!(inputs.is_empty());
+        // let (lookup_output_poly, inputs) = inputs.split_first().unwrap();
+        // let (e_polys, inputs) = inputs.split_at(table.num_memories());
+        // let (dims, inputs) = inputs.split_at(num_chunks);
+        // let (read_ts_polys, inputs) = inputs.split_at(num_chunks);
+        // let (final_cts_polys, inputs) = inputs.split_at(num_chunks);
+
+        // let [input, output] = inputs.try_into().unwrap();
+        let lookup_output_poly = inputs[0];
+        let lookup_index_poly = lookup_output_poly;
+
+        let (polys, _) = Self::commit(
+            &table,
+            subtable_polys,
+            lookup_output_poly,
+            lookup_index_poly,
+        )?;
+
+        let [e_polys, dims, read_ts_polys, final_cts_polys] = polys;
 
         let num_vars = lookup_output_poly.num_vars();
         assert!(num_vars == self.num_vars);
@@ -105,7 +118,7 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for LassoNode<F, E> {
         let res = Surge::<F, E>::prove_sum_check(
             &table,
             lookup_output_poly,
-            e_polys,
+            &e_polys,
             &r,
             num_vars,
             // points_offset,
@@ -113,6 +126,8 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for LassoNode<F, E> {
             // lookup_opening_evals,
             transcript,
         )?;
+
+        let lookup_output_eval_claim = res.into_iter().take(1).collect_vec();
 
         println!("Proved Surge sum check");
 
@@ -122,12 +137,12 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for LassoNode<F, E> {
         let mut memory_checking = Self::prepare_memory_checking(
             &table,
             subtable_polys,
-            dims,
-            read_ts_polys,
-            final_cts_polys,
-            e_polys,
-            &gamma.as_bases()[0],
-            &tau.as_bases()[0],
+            &dims,
+            &read_ts_polys,
+            &final_cts_polys,
+            &e_polys,
+            &gamma,
+            &tau,
         );
 
         memory_checking
@@ -135,7 +150,7 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for LassoNode<F, E> {
             .map(|memory_checking| memory_checking.prove(transcript))
             .collect::<Result<Vec<()>, Error>>()?;
 
-        Ok(res)
+        Ok(lookup_output_eval_claim)
     }
 
     fn verify_claim_reduction(
@@ -152,142 +167,57 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for LassoNode<F, E> {
 
         let (sub_claim, r_x_prime) = verify_sum_check(&g, claimed_sum, transcript)?;
 
-        let e_polys_eval = transcript.read_felt_exts(table.num_memories())?;
+        // let e_polys_eval = transcript.read_felt_exts(table.num_memories())?;
 
-        // // Round n+1
-        let [beta, gamma] = transcript.squeeze_challenges(2).try_into().unwrap();
+        // // // Round n+1
+        let [gamma, tau] = transcript.squeeze_challenges(2).try_into().unwrap();
 
         // // memory checking
         let memory_checking = memory_checking::verifier::prepare_memory_checking(&table);
 
         memory_checking
             .iter()
-            .map(|memory_checking| memory_checking.verify(num_vars, transcript))
+            .map(|memory_checking| {
+                memory_checking.verify(
+                    num_vars,
+                    &gamma,
+                    &tau,
+                    transcript,
+                )
+            })
             .collect::<Result<Vec<()>, Error>>()?;
 
-        Ok(chain![
-            iter::once(vec![EvalClaim::new(r.to_vec(), claimed_sum)]),
-            e_polys_eval
-                .into_iter()
-                .map(|e| vec![EvalClaim::new(r_x_prime.clone(), e)])
-        ]
-        .collect_vec())
+        Ok(chain![iter::once(vec![EvalClaim::new(r.to_vec(), claimed_sum)]),].collect_vec())
     }
 }
 
 impl<F: PrimeField, E: ExtensionField<F>> LassoNode<F, E> {
-    pub fn new(table: Box<dyn DecomposableTable<F, E>>, num_vars: usize, final_poly_log2_size: usize) -> Self {
-        Self { num_vars, table, final_poly_log2_size }
-    }
-
-    fn chunks<'a>(
-        table: &Box<dyn DecomposableTable<F, E>>,
-        subtable_polys: &'a [&BoxMultilinearPoly<F, E>],
-        dims: &'a [&BoxMultilinearPoly<F, E>],
-        read_ts_polys: &'a [&BoxMultilinearPoly<F, E>],
-        final_cts_polys: &'a [&BoxMultilinearPoly<F, E>],
-        e_polys: &'a [&BoxMultilinearPoly<F, E>],
-    ) -> Vec<Chunk<'a, F, E>> {
-        // key: chunk index, value: chunk
-        let mut chunk_map: HashMap<usize, Chunk<F, E>> = HashMap::new();
-
-        let num_memories = table.num_memories();
-        let memories = (0..num_memories).map(|memory_index| {
-            let subtable_poly = subtable_polys[table.memory_to_subtable_index(memory_index)];
-            Memory::<F, E>::new(subtable_poly, &e_polys[memory_index])
-        });
-        memories.enumerate().for_each(|(memory_index, memory)| {
-            let chunk_index = table.memory_to_chunk_index(memory_index);
-            if chunk_map.get(&chunk_index).is_some() {
-                chunk_map.entry(chunk_index).and_modify(|chunk| {
-                    chunk.add_memory(memory);
-                });
-            } else {
-                let dim = &dims[chunk_index];
-                let read_ts_poly = &read_ts_polys[chunk_index];
-                let final_cts_poly = &final_cts_polys[chunk_index];
-                chunk_map.insert(
-                    chunk_index,
-                    Chunk::new(chunk_index, dim, read_ts_poly, final_cts_poly, memory),
-                );
-            }
-        });
-
-        // sanity check
-        {
-            let num_chunks = table.chunk_bits().len();
-            assert_eq!(chunk_map.len(), num_chunks);
-        }
-
-        let mut chunks = chunk_map.into_iter().collect_vec();
-        chunks.sort_by_key(|(chunk_index, _)| *chunk_index);
-        chunks.into_iter().map(|(_, chunk)| chunk).collect_vec()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn prepare_memory_checking<'a>(
-        table: &Box<dyn DecomposableTable<F, E>>,
-        subtable_polys: &'a [&BoxMultilinearPoly<'static, F, E>],
-        dims: &'a [&BoxMultilinearPoly<'a, F, E>],
-        read_ts_polys: &'a [&BoxMultilinearPoly<'a, F, E>],
-        final_cts_polys: &'a [&BoxMultilinearPoly<'a, F, E>],
-        e_polys: &'a [&BoxMultilinearPoly<'a, F, E>],
-        gamma: &F,
-        tau: &F,
-    ) -> Vec<MemoryCheckingProver<'a, F, E>> {
-        let chunks = Self::chunks(
+    pub fn new(
+        table: Box<dyn DecomposableTable<F, E>>,
+        num_vars: usize,
+        final_poly_log2_size: usize,
+    ) -> Self {
+        Self {
+            num_vars,
             table,
-            subtable_polys,
-            dims,
-            read_ts_polys,
-            final_cts_polys,
-            e_polys,
-        );
-        let chunk_bits = table.chunk_bits();
-        // key: chunk bits, value: chunks
-        let mut chunk_map: HashMap<usize, Vec<Chunk<F, E>>> = HashMap::new();
-
-        chunks.iter().enumerate().for_each(|(chunk_index, chunk)| {
-            let chunk_bits = chunk_bits[chunk_index];
-            if let Some(_) = chunk_map.get(&chunk_bits) {
-                chunk_map.entry(chunk_bits).and_modify(|chunks| {
-                    chunks.push(chunk.clone());
-                });
-            } else {
-                chunk_map.insert(chunk_bits, vec![chunk.clone()]);
-            }
-        });
-
-        chunk_map
-            .into_iter()
-            .enumerate()
-            .map(|(index, (_, chunks))| MemoryCheckingProver::new(chunks, tau, gamma))
-            .collect_vec()
+            final_poly_log2_size,
+        }
     }
-}
 
-pub struct Lasso<F, E, Pcs>(PhantomData<F>, PhantomData<E>, PhantomData<Pcs>);
-
-impl<
-        F: Field + PrimeField,
-        E: ExtensionField<F>,
-        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>>,
-    > Lasso<F, E, Pcs>
-{
     pub fn commit<'a>(
         // pp: &Pcs::ProverParam,
         // lookup_polys_offset: usize,
         table: &Box<dyn DecomposableTable<F, E>>,
         subtable_polys: &[&BoxMultilinearPoly<'static, F, E>],
-        lookup_output_poly: BoxMultilinearPoly<'a, F, E>,
-        lookup_index_poly: BoxMultilinearPoly<'a, F, E>,
+        lookup_output_poly: &BoxMultilinearPoly<'a, F, E>,
+        lookup_index_poly: &BoxMultilinearPoly<'a, F, E>,
         // transcript: &mut dyn TranscriptWrite<F, E>,
     ) -> Result<
         (
-            [Vec<BoxMultilinearPoly<'a, F, E>>; 5],
-            Vec<Vec<Pcs::Commitment>>,
+            [Vec<BoxMultilinearPoly<'a, F, E>>; 4],
+            (), // Vec<Vec<Pcs::Commitment>>,
         ),
-        plonkish_backend::Error,
+        Error,
     > {
         let num_chunks = table.chunk_bits().len();
 
@@ -350,20 +280,14 @@ impl<
         //     .collect_vec();
 
         Ok((
-            [
-                vec![lookup_output_poly],
-                e_polys,
-                dims,
-                read_ts_polys,
-                final_cts_polys,
-            ],
-            vec![
-                // vec![lookup_output_comm],
-                // dim_comms,
-                // read_ts_comms,
-                // final_cts_comms,
-                // e_comms,
-            ],
+            [e_polys, dims, read_ts_polys, final_cts_polys],
+            (), // vec![
+                //     // vec![lookup_output_comm],
+                //     // dim_comms,
+                //     // read_ts_comms,
+                //     // final_cts_comms,
+                //     // e_comms,
+                // ],
         ))
     }
 
@@ -388,6 +312,101 @@ impl<
             })
             .collect_vec()
     }
+
+    fn chunks<'a>(
+        table: &Box<dyn DecomposableTable<F, E>>,
+        subtable_polys: &'a [&BoxMultilinearPoly<F, E>],
+        dims: &'a [BoxMultilinearPoly<F, E>],
+        read_ts_polys: &'a [BoxMultilinearPoly<F, E>],
+        final_cts_polys: &'a [BoxMultilinearPoly<F, E>],
+        e_polys: &'a [BoxMultilinearPoly<F, E>],
+    ) -> Vec<Chunk<'a, F, E>> {
+        // key: chunk index, value: chunk
+        let mut chunk_map: HashMap<usize, Chunk<F, E>> = HashMap::new();
+
+        let num_memories = table.num_memories();
+        let memories = (0..num_memories).map(|memory_index| {
+            let subtable_poly = subtable_polys[table.memory_to_subtable_index(memory_index)];
+            Memory::<F, E>::new(subtable_poly, &e_polys[memory_index])
+        });
+        memories.enumerate().for_each(|(memory_index, memory)| {
+            let chunk_index = table.memory_to_chunk_index(memory_index);
+            if chunk_map.get(&chunk_index).is_some() {
+                chunk_map.entry(chunk_index).and_modify(|chunk| {
+                    chunk.add_memory(memory);
+                });
+            } else {
+                let dim = &dims[chunk_index];
+                let read_ts_poly = &read_ts_polys[chunk_index];
+                let final_cts_poly = &final_cts_polys[chunk_index];
+                chunk_map.insert(
+                    chunk_index,
+                    Chunk::new(chunk_index, dim, read_ts_poly, final_cts_poly, memory),
+                );
+            }
+        });
+
+        // sanity check
+        {
+            let num_chunks = table.chunk_bits().len();
+            assert_eq!(chunk_map.len(), num_chunks);
+        }
+
+        let mut chunks = chunk_map.into_iter().collect_vec();
+        chunks.sort_by_key(|(chunk_index, _)| *chunk_index);
+        chunks.into_iter().map(|(_, chunk)| chunk).collect_vec()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_memory_checking<'a>(
+        table: &Box<dyn DecomposableTable<F, E>>,
+        subtable_polys: &'a [&BoxMultilinearPoly<'static, F, E>],
+        dims: &'a [BoxMultilinearPoly<'a, F, E>],
+        read_ts_polys: &'a [BoxMultilinearPoly<'a, F, E>],
+        final_cts_polys: &'a [BoxMultilinearPoly<'a, F, E>],
+        e_polys: &'a [BoxMultilinearPoly<'a, F, E>],
+        gamma: &E,
+        tau: &E,
+    ) -> Vec<MemoryCheckingProver<'a, F, E>> {
+        let chunks = Self::chunks(
+            table,
+            subtable_polys,
+            dims,
+            read_ts_polys,
+            final_cts_polys,
+            e_polys,
+        );
+        let chunk_bits = table.chunk_bits();
+        // key: chunk bits, value: chunks
+        let mut chunk_map: HashMap<usize, Vec<Chunk<F, E>>> = HashMap::new();
+
+        chunks.iter().enumerate().for_each(|(chunk_index, chunk)| {
+            let chunk_bits = chunk_bits[chunk_index];
+            if let Some(_) = chunk_map.get(&chunk_bits) {
+                chunk_map.entry(chunk_bits).and_modify(|chunks| {
+                    chunks.push(chunk.clone());
+                });
+            } else {
+                chunk_map.insert(chunk_bits, vec![chunk.clone()]);
+            }
+        });
+
+        chunk_map
+            .into_iter()
+            .enumerate()
+            .map(|(index, (_, chunks))| MemoryCheckingProver::new(chunks, tau, gamma))
+            .collect_vec()
+    }
+}
+
+pub struct Lasso<F, E, Pcs>(PhantomData<F>, PhantomData<E>, PhantomData<Pcs>);
+
+impl<
+        F: Field + PrimeField,
+        E: ExtensionField<F>,
+        Pcs: PolynomialCommitmentScheme<F, Polynomial = MultilinearPolynomial<F>>,
+    > Lasso<F, E, Pcs>
+{
 }
 
 #[cfg(test)]
@@ -398,7 +417,7 @@ pub mod test {
             test::{run_circuit, TestData},
             Circuit,
         },
-        poly::{box_dense_poly, box_owned_dense_poly, BoxMultilinearPoly, BoxMultilinearPolyOwned},
+        poly::{box_dense_poly, box_owned_dense_poly, BoxMultilinearPoly, BoxMultilinearPolyOwned, MultilinearPolyTerms, PolyExpr},
         util::{
             arithmetic::{div_ceil, inner_product, ExtensionField, Field},
             chain,
@@ -412,8 +431,10 @@ pub mod test {
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use num_integer::Integer;
     use plonkish_backend::{
-        pcs::multilinear::MultilinearBrakedown, poly::multilinear::{MultilinearPolynomialTerms, PolyExpr}, util::{code::BrakedownSpec6, Deserialize, DeserializeOwned, Serialize}
+        pcs::multilinear::MultilinearBrakedown,
+        util::{code::BrakedownSpec6, Deserialize, DeserializeOwned, Serialize},
     };
+    use rayon::vec;
     use std::{iter, marker::PhantomData};
 
     use super::{table::DecomposableTable, Lasso, LassoNode};
@@ -495,7 +516,7 @@ pub mod test {
             }
         }
 
-        fn subtable_polys_terms(&self) -> Vec<MultilinearPolynomialTerms<F>> {
+        fn subtable_polys_terms(&self) -> Vec<MultilinearPolyTerms<F>> {
             let limb_init = PolyExpr::Var(0);
             let mut limb_terms = vec![limb_init];
             (1..LIMB_BITS).for_each(|i| {
@@ -504,7 +525,8 @@ pub mod test {
                 let term = PolyExpr::Prod(vec![coeff, x]);
                 limb_terms.push(term);
             });
-            let limb_subtable_poly = MultilinearPolynomialTerms::new(LIMB_BITS, PolyExpr::Sum(limb_terms));
+            let limb_subtable_poly =
+                MultilinearPolyTerms::new(LIMB_BITS, PolyExpr::Sum(limb_terms));
             if NUM_BITS % LIMB_BITS == 0 {
                 vec![limb_subtable_poly]
             } else {
@@ -519,7 +541,7 @@ pub mod test {
                 });
                 vec![
                     limb_subtable_poly,
-                    MultilinearPolynomialTerms::new(remainder, PolyExpr::Sum(rem_terms)),
+                    MultilinearPolyTerms::new(remainder, PolyExpr::Sum(rem_terms)),
                 ]
             }
         }
@@ -557,68 +579,26 @@ pub mod test {
 
         const LIMB_BITS: usize = 16;
 
-        let table: Box<dyn DecomposableTable<F, E>> = Box::new(RangeTable::<F, E, 128, LIMB_BITS>::new());
-
-        let subtable_polys = table.subtable_polys();
-        let subtable_polys = subtable_polys.iter().collect_vec();
-        let subtable_polys = subtable_polys.as_slice();
+        let table: Box<dyn DecomposableTable<F, E>> =
+            Box::new(RangeTable::<F, E, 128, LIMB_BITS>::new());
 
         let evals = iter::repeat_with(|| F::from_u128(rng.gen_range(0..(1 << 64))))
             .take(size)
             .collect_vec();
-        let input = box_dense_poly(evals.clone());
+        // let input = box_dense_poly(evals.clone());
         let output = box_dense_poly(evals);
-
-        let (polys, _) =
-            Lasso::<F, E, Brakedown<F>>::commit(&table, subtable_polys, input, output).unwrap();
-
-        let [lookup_output_poly, e_polys, dims, read_ts_polys, final_cts_polys] = polys;
 
         let circuit = {
             let mut circuit = Circuit::default();
 
-            println!("dims {}", dims[0].num_vars());
-            println!("read_ts_polys {}", read_ts_polys[0].num_vars());
-            println!("final_cts_polys {}", final_cts_polys[0].num_vars());
-
-            let mut inputs = chain![&lookup_output_poly, &e_polys, &dims, &read_ts_polys]
-                .map(|_| circuit.insert(InputNode::new(num_vars, 1)))
-                .collect_vec();
-            let final_cts_polys = final_cts_polys.iter().map(|_| circuit.insert(InputNode::new(LIMB_BITS, 1))).collect_vec();
-            inputs.extend(final_cts_polys);
-            println!("inputs: {:?}", inputs.len());
+            let lookup_output = circuit.insert(InputNode::new(num_vars, 1));
             let lasso = circuit.insert(LassoNode::new(table, num_vars, LIMB_BITS));
-            inputs
-                .into_iter()
-                .for_each(|from| circuit.connect(from, lasso));
-
-            // let mut prev_layer = None;
-            // #[allow(clippy::never_loop)]
-            // for (i, layers) in layers.iter().enumerate() {
-            //     let mut new_layer = vec![];
-            //     for layer in layers.iter() {
-            //         let gates = vec![VanillaGate::mul((0, 0), (1, 0))];
-            //         let [left, right] = prev_layer.unwrap_or_else(|| {
-            //             println!("input node vars {:?}", layer.polys().map(|p| p.num_vars()));
-            //             layer
-            //                 .polys()
-            //                 .map(|p| circuit.insert(InputNode::new(p.num_vars(), 1)))
-            //         });
-            //         println!("vanilla node reps {}", num_vars - 2 - i);
-            //         let product =
-            //             circuit.insert(VanillaNode::new(2, 1, gates, 1 << (num_vars - 2 - i)));
-            //         circuit.connect(left, product);
-            //         circuit.connect(right, product);
-            //         new_layer.push(product);
-            //     }
-            //     prev_layer = Some(new_layer.try_into().unwrap());
-            //     // break;
-            // }
+            circuit.connect(lookup_output, lasso);
 
             circuit
         };
 
-        let inputs = chain![lookup_output_poly, e_polys, dims, read_ts_polys, final_cts_polys].collect_vec();
+        let inputs = vec![output];
 
         // let inputs = layers[0]
         //     .iter()

@@ -1,7 +1,10 @@
 use core::num;
 use std::{array, iter};
 
-use ff_ext::{ff::{Field, PrimeField}, ExtensionField};
+use ff_ext::{
+    ff::{Field, PrimeField},
+    ExtensionField,
+};
 use itertools::{chain, izip, Itertools};
 use plonkish_backend::util::parallel::{num_threads, parallelize_iter};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -31,7 +34,10 @@ impl<'a, F: PrimeField + Field, E: ExtensionField<F>> MemoryCheckingProver<'a, F
     // T_1[dim_1(x)], ..., T_k[dim_1(x)],
     // ...
     // T_{\alpha-k+1}[dim_c(x)], ..., T_{\alpha}[dim_c(x)]
-    pub fn new(chunks: Vec<Chunk<'a, F, E>>, tau: &F, gamma: &F) -> Self {
+    pub fn new(chunks: Vec<Chunk<'a, F, E>>, tau: &E, gamma: &E) -> Self {
+        // TODO: suppoer extension degree > 1
+        let tau = tau.as_bases()[0];
+        let gamma = gamma.as_bases()[0];
         let num_reads = chunks[0].num_reads();
         println!("num_reads: {}", num_reads);
         let memory_size = 1 << chunks[0].chunk_bits();
@@ -173,50 +179,12 @@ impl<'a, F: PrimeField + Field, E: ExtensionField<F>> MemoryCheckingProver<'a, F
             transcript,
         )?;
 
-        // assert_eq!(
-        //     points_offset + lookup_opening_points.len(),
-        //     self.points_offset
-        // );
-        // let x_offset = points_offset + lookup_opening_points.len();
-        // let y_offset = x_offset + 1;
-        // let (dim_xs, read_ts_poly_xs, final_cts_poly_ys, e_poly_xs) = self
-        //     .chunks
-        //     .iter()
-        //     .map(|chunk| {
-        //         let chunk_poly_evals = chunk.chunk_poly_evals(&x, &y);
-        //         let e_poly_xs = chunk.e_poly_evals(&x);
-        //         transcript.write_felt_exts(&chunk_poly_evals).unwrap();
-        //         transcript.write_felt_exts(&e_poly_xs).unwrap();
-
-        //         (
-        //             Evaluation::new(chunk.dim.offset, x_offset, chunk_poly_evals[0]),
-        //             Evaluation::new(chunk.read_ts_poly.offset, x_offset, chunk_poly_evals[1]),
-        //             Evaluation::new(chunk.final_cts_poly.offset, y_offset, chunk_poly_evals[2]),
-        //             chunk
-        //                 .memories()
-        //                 .enumerate()
-        //                 .map(|(i, memory)| {
-        //                     Evaluation::new(memory.e_poly.offset, x_offset, e_poly_xs[i])
-        //                 })
-        //                 .collect_vec(),
-        //         )
-        //     })
-        //     .multiunzip::<(
-        //         Vec<Evaluation<F>>,
-        //         Vec<Evaluation<F>>,
-        //         Vec<Evaluation<F>>,
-        //         Vec<Vec<Evaluation<F>>>,
-        //     )>();
-
-        // lookup_opening_points.extend_from_slice(&[x, y]);
-        // let opening_evals = chain!(
-        //     dim_xs,
-        //     read_ts_poly_xs,
-        //     final_cts_poly_ys,
-        //     e_poly_xs.concat()
-        // )
-        // .collect_vec();
-        // lookup_opening_evals.extend_from_slice(&opening_evals);
+        self.chunks.iter().for_each(|chunk| {
+            let chunk_poly_evals = chunk.chunk_poly_evals(&x, &y);
+            let e_poly_xs = chunk.e_poly_evals(&x);
+            transcript.write_felt_exts(&chunk_poly_evals).unwrap();
+            transcript.write_felt_exts(&e_poly_xs).unwrap();
+        });
 
         Ok(())
     }
@@ -225,23 +193,15 @@ impl<'a, F: PrimeField + Field, E: ExtensionField<F>> MemoryCheckingProver<'a, F
         num_batching: usize,
         vs: impl Iterator<Item = &'b BoxMultilinearPoly<'a, F, E>>,
         transcript: &mut dyn TranscriptWrite<F, E>,
-    ) -> Result<(Vec<E>, Vec<E>), Error> where 'a : 'b {
+    ) -> Result<(Vec<E>, Vec<E>), Error>
+    where
+        'a: 'b,
+    {
         let bottom_layers = vs.map(Layer::bottom).collect_vec();
         let layers = iter::successors(bottom_layers.into(), |layers| {
             (layers[0].num_vars() > 0).then(|| layers.iter().map(Layer::up).collect())
         })
         .collect_vec();
-
-        println!(
-            "layers: {:?}",
-            layers
-                .iter()
-                .map(|l| l
-                    .iter()
-                    .map(|e| [e.v_l.num_vars(), e.v_r.num_vars()])
-                    .collect_vec())
-                .collect_vec()
-        );
 
         let claimed_v_0s = {
             let v_0s = chain![layers.last().unwrap()]
@@ -250,7 +210,7 @@ impl<'a, F: PrimeField + Field, E: ExtensionField<F>> MemoryCheckingProver<'a, F
                     E::from_bases(&[v_l * v_r])
                 })
                 .collect_vec();
-    
+
             let mut hash_to_transcript = |claimed: Vec<Option<E>>, computed: Vec<_>| {
                 izip!(claimed, computed)
                     .map(|(claimed, computed)| match claimed {
@@ -265,15 +225,15 @@ impl<'a, F: PrimeField + Field, E: ExtensionField<F>> MemoryCheckingProver<'a, F
                     })
                     .try_collect::<_, Vec<_>, _>()
             };
-    
+
             hash_to_transcript(iter::repeat(None).take(num_batching).collect_vec(), v_0s)?
         };
 
-        #[allow(clippy::manual_try_fold)]
         layers
             .iter()
-            .fold(Ok((claimed_v_0s, Vec::new())), |result, layers| {
-                let (claimed_v_ys, _y) = result?;
+            .rev()
+            .try_fold((claimed_v_0s, Vec::new()), |result, layers| {
+                let (claimed_v_ys, _y) = result;
 
                 let num_vars = layers[0].num_vars();
                 let polys = layers.iter().flat_map(|layer| layer.polys());
@@ -301,6 +261,8 @@ impl<'a, F: PrimeField + Field, E: ExtensionField<F>> MemoryCheckingProver<'a, F
 
                     (x, evals)
                 };
+
+                transcript.write_felt_exts(&evals)?;
 
                 let mu = transcript.squeeze_challenge();
 

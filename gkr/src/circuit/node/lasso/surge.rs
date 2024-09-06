@@ -147,7 +147,7 @@ impl<
     pub fn prove_sum_check(
         table: &Box<dyn DecomposableTable<F, E>>,
         lookup_output_poly: &BoxMultilinearPoly<F, E>,
-        e_polys: &[&BoxMultilinearPoly<F, E>],
+        e_polys: &[BoxMultilinearPoly<F, E>],
         r: &[E],
         num_vars: usize,
         // points_offset: usize,
@@ -194,7 +194,6 @@ impl<
 
         let polys = e_polys
             .iter()
-            .cloned()
             .map(|e_poly| SumCheckPoly::Base::<_, _, _, BoxMultilinearPoly<E, E>>(e_poly))
             .collect_vec();
 
@@ -203,7 +202,7 @@ impl<
         println!("r_x_prime: {:?}", r_x_prime.len());
         println!("evals: {:?}", e_polys_evals.len());
 
-        transcript.write_felt_exts(&e_polys_evals)?;
+        // transcript.write_felt_exts(&e_polys_evals)?;
 
         // lookup_opening_points.extend_from_slice(&[r.to_vec(), x]);
         // let evals = expression
@@ -239,7 +238,7 @@ impl<
     pub fn sum_check_claim(
         r: &[E], // claim: CombinedEvalClaim<E>,
         table: &Box<dyn DecomposableTable<F, E>>,
-        e_polys: &[&BoxMultilinearPoly<F, E>],
+        e_polys: &[BoxMultilinearPoly<F, E>],
     ) -> E {
         let num_memories = table.num_memories();
         assert_eq!(e_polys.len(), num_memories);
