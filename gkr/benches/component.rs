@@ -3,7 +3,7 @@ use criterion::{
     BenchmarkId, Criterion,
 };
 use gkr::{
-    poly::{box_dense_poly, eq_poly, DenseMultilinearPoly, MultilinearPoly},
+    poly::{box_dense_poly, eq_poly, DensePolynomial, MultilinearPoly},
     sum_check::{quadratic::Quadratic, SumCheckFunction, SumCheckPoly},
     util::{
         arithmetic::Field,
@@ -51,7 +51,7 @@ fn bench_fix_var(c: &mut Criterion) {
         let r = F::random(&mut rng);
 
         for num_vars in RANGE {
-            let f = DenseMultilinearPoly::new(&f[..1 << num_vars]);
+            let f = DensePolynomial::new(&f[..1 << num_vars]);
             let id = BenchmarkId::new(field_name::<F>(), num_vars);
             group.bench_with_input(id, &r, |b, r| {
                 b.iter(|| black_box(&f).fix_var(black_box(r)))

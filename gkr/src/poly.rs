@@ -14,7 +14,7 @@ mod repeated;
 mod terms;
 
 pub use binary::BinaryMultilinearPoly;
-pub use dense::{box_dense_poly, box_owned_dense_poly, repeated_dense_poly, DenseMultilinearPoly};
+pub use dense::{box_dense_poly, box_owned_dense_poly, repeated_dense_poly, DensePolynomial};
 pub use eq::{eq_eval, eq_expand, eq_poly, PartialEqPoly};
 pub use repeated::RepeatedMultilinearPoly;
 pub use terms::{MultilinearPolyTerms, PolyExpr};
