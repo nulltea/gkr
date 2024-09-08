@@ -35,6 +35,12 @@ impl<F: PrimeField, E: ExtensionField<F>, const LIMB_SIZE: usize> LassoSubtable<
     }
 }
 
+impl<F,E,const LIMB_SIZE: usize> FullLimbSubtable<F,E,LIMB_SIZE> {
+    pub fn new() -> Self {
+        Self(PhantomData)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ReminderSubtable<F, E, const NUM_BITS: usize, const LIMB_SIZE: usize>(
     PhantomData<(F, E)>,
@@ -91,13 +97,14 @@ impl<const NUM_BITS: usize, const LIMB_BITS: usize> LookupType
         &self,
     ) -> Vec<(Box<dyn LassoSubtable<F, E>>, SubtableIndices)> {
         let full = Box::new(FullLimbSubtable::<F, E, LIMB_BITS>(PhantomData));
+        let num_memories = div_ceil(NUM_BITS, LIMB_BITS);
         if NUM_BITS % LIMB_BITS == 0 {
-            vec![(full, SubtableIndices::from(0))]
+            vec![(full, SubtableIndices::from(0..num_memories))]
         } else {
             let rem = Box::new(ReminderSubtable::<F, E, NUM_BITS, LIMB_BITS>(PhantomData));
             vec![
-                (full, SubtableIndices::from(0)),
-                (rem, SubtableIndices::from(0)),
+                (full, SubtableIndices::from(0..num_memories)),
+                (rem, todo!()),
             ]
         }
     }

@@ -1,10 +1,11 @@
-use std::any::TypeId;
+use std::{any::TypeId, fmt::Debug};
 
 use enum_dispatch::enum_dispatch;
 use ff_ext::{ff::PrimeField, ExtensionField};
 use fixedbitset::FixedBitSet;
 use plonkish_backend::poly::multilinear::MultilinearPolynomialTerms;
 use strum::{EnumCount, IntoEnumIterator};
+use std::ops::Range;
 
 use crate::{
     poly::{BoxMultilinearPoly, BoxMultilinearPolyOwned, MultilinearPolyTerms},
@@ -32,14 +33,18 @@ pub trait LassoSubtable<F: PrimeField, E: ExtensionField<F>>: 'static + Sync {
 }
 
 pub trait SubtableSet<F: PrimeField, E: ExtensionField<F>>:
-    LassoSubtable<F, E> + IntoEnumIterator + EnumCount + From<SubtableId> + Into<usize> + Send + Sync
+    LassoSubtable<F, E> + IntoEnumIterator + EnumCount + From<SubtableId> + Send + Sync + Debug
 {
     fn enum_index(subtable: Box<dyn LassoSubtable<F, E>>) -> usize {
-        Self::from(subtable.subtable_id()).into()
+        let s = Self::from(subtable.subtable_id());
+        let byte = unsafe { *(&s as *const Self as *const u8) };
+        byte as usize
     }
 }
 
-pub trait CircuitLookups: LookupType + IntoEnumIterator + EnumCount + Send + Sync + std::fmt::Debug + Copy {
+pub trait CircuitLookups:
+    LookupType + IntoEnumIterator + EnumCount + Send + Sync + std::fmt::Debug + Copy
+{
     fn enum_index(lookup_type: &Self) -> usize {
         // Discriminant: https://doc.rust-lang.org/reference/items/enumerations.html#pointer-casting
         let byte = unsafe { *(lookup_type as *const Self as *const u8) };
@@ -62,10 +67,7 @@ pub trait LookupType: Clone + Send + Sync {
 
     // fn to_indices<F: PrimeField>(&self, value: &F) -> Vec<usize>;
 
-    fn output<F: PrimeField>(
-        &self,
-        index: &F
-    ) -> F;
+    fn output<F: PrimeField>(&self, index: &F) -> F;
 
     fn chunk_bits(&self) -> Vec<usize>;
 
@@ -112,12 +114,12 @@ impl From<usize> for SubtableIndices {
     }
 }
 
-// impl From<Range<usize>> for SubtableIndices {
-//     fn from(range: Range<usize>) -> Self {
-//         let bitset = FixedBitSet::from_iter(range);
-//         Self { bitset }
-//     }
-// }
+impl From<Range<usize>> for SubtableIndices {
+    fn from(range: Range<usize>) -> Self {
+        let bitset = FixedBitSet::from_iter(range);
+        Self { bitset }
+    }
+}
 
 /// This is a trait that contains information about decomposable table to which
 /// backend prover and verifier can ask
