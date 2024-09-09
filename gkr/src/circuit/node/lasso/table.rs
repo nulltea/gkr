@@ -4,8 +4,8 @@ use enum_dispatch::enum_dispatch;
 use ff_ext::{ff::PrimeField, ExtensionField};
 use fixedbitset::FixedBitSet;
 use plonkish_backend::poly::multilinear::MultilinearPolynomialTerms;
-use strum::{EnumCount, IntoEnumIterator};
 use std::ops::Range;
+use strum::{EnumCount, IntoEnumIterator};
 
 use crate::{
     poly::{BoxMultilinearPoly, BoxMultilinearPolyOwned, MultilinearPolyTerms},
@@ -17,7 +17,7 @@ pub mod range;
 pub type SubtableId = TypeId;
 
 #[enum_dispatch]
-pub trait LassoSubtable<F: PrimeField, E: ExtensionField<F>>: 'static + Sync {
+pub trait LassoSubtable<F: PrimeField, E: ExtensionField<F>>: 'static + Sync + Debug {
     /// Returns the TypeId of this subtable.
     /// The `Jolt` trait has associated enum types `InstructionSet` and `Subtables`.
     /// This function is used to resolve the many-to-many mapping between `InstructionSet` variants
@@ -27,9 +27,12 @@ pub trait LassoSubtable<F: PrimeField, E: ExtensionField<F>>: 'static + Sync {
     }
     /// Fully materializes a subtable of size `M`, reprensented as a Vec of length `M`.
     fn materialize(&self, M: usize) -> Vec<F>;
-    /// Evaluates the multilinear extension polynomial for this subtable at the given `point`,
+
+    // fn evaluate_mle(&self, point: &[E]) -> E;
+
+    /// Expression to evaluate the multilinear extension polynomial for this subtable at the given `point`,
     /// interpreted to be of size log_2(M), where M is the size of the subtable.
-    fn evaluate_mle(&self, point: &[E]) -> E;
+    fn evaluate_mle_expr(&self, log2_M: usize) -> MultilinearPolyTerms<F>;
 }
 
 pub trait SubtableSet<F: PrimeField, E: ExtensionField<F>>:
@@ -55,25 +58,34 @@ pub trait CircuitLookups:
 #[enum_dispatch]
 pub trait LookupType: Clone + Send + Sync {
     /// The `g` function that computes T[r] = g(T_1[r_1], ..., T_k[r_1], T_{k+1}[r_2], ..., T_{\alpha}[r_c])
-    fn combine_lookups<F: PrimeField>(&self, operands: &[F]) -> F;
+    fn combine_lookups<F: PrimeField>(&self, operands: &[F], C: usize, M: usize) -> F;
+
+    fn combine_lookup_expressions<F: PrimeField, E: ExtensionField<F>>(
+        &self,
+        expressions: Vec<Expression<E, usize>>,
+        C: usize,
+        M: usize,
+    ) -> Expression<E, usize>;
 
     /// Returns a Vec of the unique subtable types used by this instruction. For some instructions,
     /// e.g. SLL, the list of subtables depends on the dimension `C`.
     fn subtables<F: PrimeField, E: ExtensionField<F>>(
         &self,
-        // C: usize,
-        // M: usize,
+        C: usize,
+        M: usize,
     ) -> Vec<(Box<dyn LassoSubtable<F, E>>, SubtableIndices)>;
 
     // fn to_indices<F: PrimeField>(&self, value: &F) -> Vec<usize>;
 
     fn output<F: PrimeField>(&self, index: &F) -> F;
 
-    fn chunk_bits(&self) -> Vec<usize>;
+    fn chunk_bits(&self, log_M: usize) -> Vec<usize>;
 
     /// Returns the indices of each subtable lookups
     /// The length of `index_bits` is same as actual bit length of table index
-    fn subtable_indices(&self, index_bits: Vec<bool>) -> Vec<Vec<bool>>;
+    fn subtable_indices(&self, index_bits: Vec<bool>, log_M: usize) -> Vec<Vec<bool>>;
+
+    // fn num_memories(&self) -> usize;
 }
 
 #[derive(Clone)]
@@ -127,12 +139,6 @@ pub trait DecomposableTable<F: PrimeField, E: ExtensionField<F>>:
     std::fmt::Debug + Sync + DecomposableTableClone<F, E>
 {
     fn num_memories(&self) -> usize;
-
-    fn subtables(
-        &self,
-        // C: usize,
-        // M: usize,
-    ) -> Vec<Box<dyn LassoSubtable<F, E>>>;
 
     /// Returns multilinear extension polynomials of each subtable
     fn subtable_polys(&self) -> Vec<BoxMultilinearPoly<'static, F, E>>;

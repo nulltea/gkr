@@ -6,7 +6,15 @@ use itertools::{chain, izip, Itertools};
 use plonkish_backend::{pcs::Evaluation, poly::multilinear::MultilinearPolynomialTerms};
 
 use crate::{
-    circuit::node::{lasso::memory_checking::MemoryCheckingProver, DecomposableTable}, poly::{BoxMultilinearPoly, MultilinearPolyTerms}, sum_check::verify_sum_check, transcript::TranscriptRead, util::arithmetic::inner_product, Error
+    circuit::node::{
+        lasso::{memory_checking::MemoryCheckingProver, LassoLookupsPreprocessing},
+        DecomposableTable, SubtableSet,
+    },
+    poly::{BoxMultilinearPoly, MultilinearPolyTerms},
+    sum_check::verify_sum_check,
+    transcript::TranscriptRead,
+    util::arithmetic::inner_product,
+    Error,
 };
 
 #[derive(Debug)]
@@ -250,107 +258,4 @@ impl<'a, F: PrimeField, E: ExtensionField<F>> MemoryCheckingVerifier<F, E> {
             Ok((v_xs, x))
         })
     }
-
-    // fn opening_evals(
-    //     &self,
-    //     num_chunks: usize,
-    //     polys_offset: usize,
-    //     points_offset: usize,
-    //     lookup_opening_points: &Vec<Vec<F>>,
-    //     lookup_opening_evals: &mut Vec<Evaluation<F>>,
-    //     dim_xs: &[F],
-    //     read_ts_poly_xs: &[F],
-    //     final_cts_poly_ys: &[F],
-    //     e_poly_xs: &[F],
-    // ) {
-    //     let x_offset = points_offset + lookup_opening_points.len();
-    //     let y_offset = x_offset + 1;
-    //     let (dim_xs, read_ts_poly_xs, final_cts_poly_ys) = self
-    //         .chunks
-    //         .iter()
-    //         .enumerate()
-    //         .map(|(i, chunk)| {
-    //             let chunk_polys_index = chunk.chunk_polys_index(polys_offset, num_chunks);
-    //             (
-    //                 Evaluation::new(chunk_polys_index[0], x_offset, dim_xs[i]),
-    //                 Evaluation::new(chunk_polys_index[1], x_offset, read_ts_poly_xs[i]),
-    //                 Evaluation::new(chunk_polys_index[2], y_offset, final_cts_poly_ys[i]),
-    //             )
-    //         })
-    //         .multiunzip::<(Vec<Evaluation<F>>, Vec<Evaluation<F>>, Vec<Evaluation<F>>)>();
-
-    //     let e_poly_offset = polys_offset + 1 + 3 * num_chunks;
-    //     let e_poly_xs = self
-    //         .chunks
-    //         .iter()
-    //         .flat_map(|chunk| chunk.memory_indices())
-    //         .zip(e_poly_xs)
-    //         .map(|(memory_index, &e_poly_x)| {
-    //             Evaluation::new(e_poly_offset + memory_index, x_offset, e_poly_x)
-    //         })
-    //         .collect_vec();
-    //     lookup_opening_evals.extend_from_slice(
-    //         &chain!(dim_xs, read_ts_poly_xs, final_cts_poly_ys, e_poly_xs).collect_vec(),
-    //     );
-    // }
-}
-
-fn chunks<F: PrimeField, E: ExtensionField<F>>(
-    table: &Box<dyn DecomposableTable<F, E>>,
-) -> Vec<Chunk<F>> {
-    let num_memories = table.num_memories();
-    let chunk_bits = table.chunk_bits();
-    let subtable_polys = table.subtable_polys_terms();
-    // key: chunk index, value: chunk
-    let mut chunk_map: HashMap<usize, Chunk<F>> = HashMap::new();
-    (0..num_memories).for_each(|memory_index| {
-        let chunk_index = table.memory_to_chunk_index(memory_index);
-        let chunk_bits = chunk_bits[chunk_index];
-        let subtable_poly = &subtable_polys[table.memory_to_subtable_index(memory_index)];
-        let memory = Memory::new(memory_index, subtable_poly.clone());
-        if chunk_map.get(&chunk_index).is_some() {
-            chunk_map.entry(chunk_index).and_modify(|chunk| {
-                chunk.add_memory(memory);
-            });
-        } else {
-            chunk_map.insert(chunk_index, Chunk::new(chunk_index, chunk_bits, memory));
-        }
-    });
-
-    // sanity check
-    {
-        let num_chunks = table.chunk_bits().len();
-        assert_eq!(chunk_map.len(), num_chunks);
-    }
-
-    let mut chunks = chunk_map.into_iter().collect_vec();
-    chunks.sort_by_key(|(chunk_index, _)| *chunk_index);
-    chunks.into_iter().map(|(_, chunk)| chunk).collect_vec()
-}
-
-pub fn prepare_memory_checking<F: PrimeField, E: ExtensionField<F>>(
-    table: &Box<dyn DecomposableTable<F, E>>,
-) -> Vec<MemoryCheckingVerifier<F, E>> {
-    let chunks = chunks(table);
-    let chunk_bits = table.chunk_bits();
-    // key: chunk_bits, value: chunks
-    let mut chunk_map = HashMap::<usize, Vec<Chunk<F>>>::new();
-    chunks
-        .into_iter()
-        .enumerate()
-        .for_each(|(chunk_index, chunk)| {
-            let chunk_bits = chunk_bits[chunk_index];
-            if chunk_map.get(&chunk_bits).is_some() {
-                chunk_map.entry(chunk_bits).and_modify(|chunks| {
-                    chunks.push(chunk);
-                });
-            } else {
-                chunk_map.insert(chunk_bits, vec![chunk]);
-            }
-        });
-    chunk_map
-        .into_iter()
-        .enumerate()
-        .map(|(_, (_, chunks))| MemoryCheckingVerifier::new(chunks))
-        .collect_vec()
 }
