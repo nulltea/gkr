@@ -112,6 +112,8 @@ impl<
             lookup_outputs,
         } = polys;
 
+        // assert_eq!(lookup_output_poly.to_dense(), lookup_outputs.to_dense());
+
         // let [e_polys, dims, read_ts_polys, final_cts_polys] = polys;
 
         let num_vars = lookup_output_poly.num_vars();
@@ -122,8 +124,8 @@ impl<
         // should this be passed from CombinedEvalClaim?
         let r = transcript.squeeze_challenges(num_vars);
 
-        let res = Self::prove_collation_sum_check(
-            lookup_output_poly,
+        let res = self.prove_collation_sum_check(
+            &lookup_outputs,
             &mock_lookup,
             &e_polys,
             &r,
@@ -138,7 +140,7 @@ impl<
         let [gamma, tau] = transcript.squeeze_challenges(2).try_into().unwrap();
 
         // memory_checking
-        let mut memory_checking = Self::prepare_memory_checking(
+        Self::prove_memory_checking(
             &self.preprocessing,
             &dims,
             &read_ts_polys,
@@ -146,14 +148,8 @@ impl<
             &e_polys,
             &gamma,
             &tau,
-        );
-
-        memory_checking.prove(transcript)?;
-
-        // memory_checking
-        //     .iter_mut()
-        //     .map(|memory_checking| memory_checking.prove(transcript))
-        //     .collect::<Result<Vec<()>, Error>>()?;
+            transcript,
+        )?;
 
         Ok(lookup_output_eval_claim)
     }
@@ -167,7 +163,7 @@ impl<
         let num_vars = self.num_vars;
         let r = transcript.squeeze_challenges(num_vars);
 
-        let g = Self::collation_sum_check_function(&mock_lookup, num_vars);
+        let g = self.collation_sum_check_function(&mock_lookup, num_vars);
         let claimed_sum = transcript.read_felt_ext()?;
 
         let (sub_claim, r_x_prime) = verify_sum_check(&g, claimed_sum, transcript)?;
@@ -257,8 +253,10 @@ impl<
         tau: &E,
         transcript: &mut dyn TranscriptRead<F, E>,
     ) -> Result<(), Error> {
+
         let num_memories = preprocessing.num_memories;
-        // let chunk_bits = preprocessing.chunk_bits();
+        // let mock_lookup = Lookups::iter().collect_vec()[0];
+        // let chunk_bits = mock_lookup.chunk_bits(log2(M) as usize);
         // key: chunk index, value: chunk
         let mut chunk_map: HashMap<usize, memory_checking::verifier::Chunk<F>> = HashMap::new();
         (0..num_memories).for_each(|memory_index| {
@@ -275,7 +273,7 @@ impl<
             } else {
                 chunk_map.insert(
                     chunk_index,
-                    memory_checking::verifier::Chunk::new(chunk_index, C, memory),
+                    memory_checking::verifier::Chunk::new(chunk_index, log2(M) as usize, memory),
                 );
             }
         });
@@ -295,7 +293,7 @@ impl<
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn prepare_memory_checking<'a>(
+    fn prove_memory_checking<'a>(
         preprocessing: &'a LassoLookupsPreprocessing<F, E>,
         dims: &'a [BoxMultilinearPoly<'a, F, E>],
         read_ts_polys: &'a [BoxMultilinearPoly<'a, F, E>],
@@ -303,9 +301,10 @@ impl<
         e_polys: &'a [BoxMultilinearPoly<'a, F, E>],
         gamma: &E,
         tau: &E,
-    ) -> MemoryCheckingProver<'a, F, E> {
+        transcript: &mut dyn TranscriptWrite<F, E>,
+    ) -> Result<(), Error> {
         let chunks = Self::chunks(preprocessing, dims, read_ts_polys, final_cts_polys, e_polys);
-        MemoryCheckingProver::new(chunks, tau, gamma)
+        MemoryCheckingProver::new(chunks, tau, gamma).prove(transcript)
     }
 
     pub fn polynomialize<'a>(
@@ -314,11 +313,11 @@ impl<
         lookup_index_poly: &BoxMultilinearPoly<F, E>,
     ) -> LassoPolynomials<'a, F, E> {
         let num_memories = preprocessing.num_memories;
-        let num_rows: usize = lookup_index_poly.len();
+        let num_reads: usize = lookup_index_poly.len();
 
         let lookup = Lookups::iter().collect_vec()[0];
 
-        assert_eq!(num_memories, C);
+        // assert_eq!(num_memories, C);
 
         // subtable_lookup_indices : [[usize; num_rows]; num_chunks]
         let lookup_indexes = lookup_index_poly.as_dense().unwrap();
@@ -328,30 +327,34 @@ impl<
         println!("num memories: {}", num_memories);
 
         let polys: Vec<_> = (0..preprocessing.num_memories)
-            .into_par_iter()
+            // .into_par_iter()
+            .into_iter()
             .map(|memory_index| {
                 let dim_index = preprocessing.memory_to_dimension_index[memory_index];
                 let subtable_index = preprocessing.memory_to_subtable_index[memory_index];
                 let access_sequence: &Vec<usize> = &subtable_lookup_indices[dim_index];
 
                 let mut final_cts_i = vec![0usize; M]; // TODO: or should be lookup s
-                let mut read_cts_i = vec![0usize; num_rows];
-                let mut subtable_lookups = vec![F::ZERO; num_rows];
+                let mut read_cts_i = vec![0usize; num_reads];
+                let mut subtable_lookups = vec![F::ZERO; num_reads];
 
+                println!("memory_index {} dim {} access_sequence: {:?}", memory_index, dim_index, access_sequence);
                 for (j, op) in lookup_indexes.iter().enumerate() {
                     let memories_used =
                         &preprocessing.lookup_to_memory_indices[Lookups::enum_index(&lookup)];
                     if memories_used.contains(&memory_index) {
                         let memory_address = access_sequence[j];
-                        println!("memory_address: {}", memory_address);
                         debug_assert!(memory_address < M);
 
                         let counter = final_cts_i[memory_address];
                         read_cts_i[j] = counter;
                         final_cts_i[memory_address] = counter + 1;
-                        // dims?
                         subtable_lookups[j] =
                             preprocessing.materialized_subtables[subtable_index][memory_address];
+
+                        println!("lookup_indexes[j]: {:?}", op);
+                        println!("memory_address: {}", memory_address);
+                        println!("subtable_lookups[j]: {:?}", subtable_lookups[j]);
                     }
                 }
 
@@ -396,7 +399,7 @@ impl<
         //     .collect();
 
         let mut lookup_outputs = Self::compute_lookup_outputs(&lookup_indexes);
-        lookup_outputs.resize(num_rows, F::ZERO);
+        lookup_outputs.resize(num_reads, F::ZERO);
         let lookup_outputs = box_dense_poly(lookup_outputs);
 
         LassoPolynomials {
@@ -409,27 +412,6 @@ impl<
             lookup_outputs,
         }
     }
-
-    // fn subtable_lookup_indices(
-    //     lookup_index_poly: &[F],
-    //     lookup: impl LookupType,
-    // ) -> Vec<Vec<usize>> {
-    //     let m = lookup_index_poly.len().next_power_of_two();
-    //     // let log_M = M.log_2();
-    //     let chunked_indices: Vec<Vec<usize>> = lookup_index_poly
-    //         .iter()
-    //         .map(|e| lookup.to_indices(e))
-    //         .collect();
-
-    //     let mut subtable_lookup_indices: Vec<Vec<usize>> = Vec::with_capacity(C);
-    //     for i in 0..C {
-    //         let mut access_sequence: Vec<usize> =
-    //             chunked_indices.iter().map(|chunks| chunks[i]).collect();
-    //         access_sequence.resize(m, 0);
-    //         subtable_lookup_indices.push(access_sequence);
-    //     }
-    //     subtable_lookup_indices
-    // }
 
     fn subtable_lookup_indices(index_poly: &[F], lookup: impl LookupType) -> Vec<Vec<usize>> {
         let num_rows: usize = index_poly.len();
@@ -485,6 +467,7 @@ impl<
 
     pub fn prove_collation_sum_check(
         // table: &Box<dyn DecomposableTable<F, E>>,
+        &self,
         lookup_output_poly: &BoxMultilinearPoly<F, E>,
         lookup: &impl LookupType,
         e_polys: &[BoxMultilinearPoly<F, E>],
@@ -495,42 +478,12 @@ impl<
         // lookup_opening_evals: &mut Vec<Evaluation<F>>,
         transcript: &mut dyn TranscriptWrite<F, E>,
     ) -> Result<Vec<Vec<EvalClaim<E>>>, Error> {
-        let claimed_sum = Self::sum_check_claim(r, lookup, e_polys);
+        let claimed_sum = self.sum_check_claim(r, lookup, e_polys);
         assert_eq!(claimed_sum, lookup_output_poly.evaluate(r));
 
         transcript.write_felt_ext(&claimed_sum)?;
 
-        // proceed sumcheck
-        // let (x, evals) = SumCheck::prove(
-        //     &(),
-        //     num_vars,
-        //     VirtualPolynomial::new(
-        //         &expression,
-        //         e_polys.iter().map(|e_poly| &e_poly.poly),
-        //         &[],
-        //         &[r.to_vec()],
-        //     ),
-        //     claimed_sum,
-        //     transcript,
-        // )?;
-
-        let g = Self::collation_sum_check_function(lookup, num_vars);
-
-        // let polys = {
-        //     let eq_r_x = box_dense_poly(eq_poly(&r_x, E::ONE));
-        //     let omegas = box_dense_poly(self.omegas(layer).copied().collect::<Vec<_>>());
-        //     let w_interms = w_interms
-        //         .iter()
-        //         .map(|w_interms| w_interms.iter().nth_back(layer).unwrap())
-        //         .map(|w| repeated_dense_poly(w, 1));
-        //     chain![
-        //         [SumCheckPoly::Extension(eq_r_x), SumCheckPoly::Base(omegas)],
-        //         w_interms.map(SumCheckPoly::Extension)
-        //     ]
-        //     .collect_vec()
-        // };
-
-        println!("e_polys: {}", e_polys.len());
+        let g = self.collation_sum_check_function(lookup, num_vars);
 
         let polys = e_polys
             .iter()
@@ -577,11 +530,12 @@ impl<
     }
 
     pub fn sum_check_claim(
+        &self,
         r: &[E], // claim: CombinedEvalClaim<E>,
         lookup: &impl LookupType,
         e_polys: &[BoxMultilinearPoly<F, E>],
     ) -> E {
-        let num_memories = C; //lookup.num_memories();
+        let num_memories = self.preprocessing.num_memories;
         assert_eq!(e_polys.len(), num_memories);
         let num_vars = e_polys[0].num_vars();
         let bh_size = 1 << num_vars;
@@ -600,10 +554,11 @@ impl<
 
     // (\tilde{eq}(r, k) * g(E_1(k), ..., E_{\alpha}(k)))
     pub fn collation_sum_check_function(
+        &self,
         lookup: &impl LookupType,
         num_vars: usize,
     ) -> Generic<F, E> {
-        let num_memories = C; //lookup.num_memories();
+        let num_memories = self.preprocessing.num_memories;
         let exprs = lookup.combine_lookup_expressions(
             (0..num_memories)
                 .map(|idx| Expression::poly(idx))
@@ -683,7 +638,6 @@ impl<F: PrimeField, E: ExtensionField<F>> LassoLookupsPreprocessing<F, E> {
             vec![SubtableIndices::with_capacity(C); Subtables::COUNT];
         let mut subtable_ids: Vec<std::any::TypeId> = Vec::with_capacity(Subtables::COUNT);
         let mut subtable_evaluate_mle_exprs = Vec::with_capacity(Subtables::COUNT);
-        // println!("subtable_indices: {:?}", subtable_indices);
         for lookup in Lookups::iter() {
             for (subtable, indices) in lookup.subtables::<F, E>(C, M).into_iter() {
                 subtable_ids.push(subtable.subtable_id());
@@ -692,6 +646,14 @@ impl<F: PrimeField, E: ExtensionField<F>> LassoLookupsPreprocessing<F, E> {
                 subtable_indices[subtable_idx].union_with(&indices);
             }
         }
+        println!(
+            "subtable_indices: {:?}",
+            subtable_indices
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i, e.len()))
+                .collect_vec()
+        );
 
         let mut subtable_to_memory_indices = Vec::with_capacity(Subtables::COUNT);
         let mut memory_to_subtable_index = vec![];
@@ -770,7 +732,7 @@ pub mod test {
         util::{
             arithmetic::{div_ceil, inner_product, ExtensionField, Field},
             chain,
-            dev::{rand_range, rand_vec, seeded_std_rng},
+            dev::{rand_range, rand_vec, seeded_std_rng, std_rng},
             expression::Expression,
             Itertools, RngCore,
         },
@@ -827,15 +789,20 @@ pub mod test {
     };
 }
 
+    const TEST_BITS: usize = 55;
+
     subtable_enum!(
         RangeSubtables,
-        Full: FullLimbSubtable<F, E>
+        Full: FullLimbSubtable<F, E>,
+        Reminder: ReminderSubtable<F, E, TEST_BITS>
     );
 
     #[derive(Copy, Clone, Debug, EnumCount, EnumIter)]
     #[enum_dispatch(LookupType)]
     enum RangeLookups<const LIMB_BITS: usize> {
-        Range128(RangeStategy<128>),
+        // Range128(RangeStategy<128>),
+        // Range64(RangeStategy<64>),
+        RangeTest(RangeStategy<TEST_BITS>),
     }
     impl<const LIMB_BITS: usize> CircuitLookups for RangeLookups<LIMB_BITS> {}
 
@@ -868,10 +835,8 @@ pub mod test {
 
         const LIMB_BITS: usize = 16;
 
-        let table: Box<dyn DecomposableTable<F, E>> =
-            Box::new(RangeTable::<F, E, 128, LIMB_BITS>::new());
-
-        let evals = iter::repeat_with(|| F::from_u128(rng.gen_range(0..(1 << 64))))
+        let rng = &mut std_rng();
+        let evals = iter::repeat_with(|| F::from_u128(rng.gen_range(0..(1 << TEST_BITS))))
             .take(size)
             .collect_vec();
         // let input = box_dense_poly(evals.clone());

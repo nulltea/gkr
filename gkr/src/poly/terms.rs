@@ -22,6 +22,10 @@ impl<F: Field> MultilinearPolyTerms<F> {
         assert_eq!(x.len(), self.num_vars);
         self.expression.evaluate(x)
     }
+
+    pub fn num_vars(&self) -> usize {
+        self.num_vars
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

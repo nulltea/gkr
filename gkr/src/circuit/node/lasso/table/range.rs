@@ -30,7 +30,7 @@ impl<F: PrimeField, E: ExtensionField<F>> LassoSubtable<F, E> for FullLimbSubtab
     //     }
     //     result
     // }
-    
+
     fn evaluate_mle_expr(&self, log2_M: usize) -> MultilinearPolyTerms<F> {
         let limb_init = PolyExpr::Var(0);
         let mut limb_terms = vec![limb_init];
@@ -51,17 +51,15 @@ impl<F, E> FullLimbSubtable<F, E> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ReminderSubtable<F, E, const NUM_BITS: usize>(
-    PhantomData<(F, E)>,
-);
+pub struct ReminderSubtable<F, E, const NUM_BITS: usize>(PhantomData<(F, E)>);
 
-impl<F: PrimeField, E: ExtensionField<F>, const NUM_BITS: usize>
-    LassoSubtable<F, E> for ReminderSubtable<F, E, NUM_BITS>
+impl<F: PrimeField, E: ExtensionField<F>, const NUM_BITS: usize> LassoSubtable<F, E>
+    for ReminderSubtable<F, E, NUM_BITS>
 {
     fn materialize(&self, M: usize) -> Vec<F> {
         let cutoff = 1 << (NUM_BITS % M.ilog2() as usize);
 
-        (0..1 << M)
+        (0..M)
             .map(|i| {
                 if i < cutoff {
                     F::from(i as u64)
@@ -86,7 +84,7 @@ impl<F: PrimeField, E: ExtensionField<F>, const NUM_BITS: usize>
     //     }
     //     result
     // }
-    
+
     fn evaluate_mle_expr(&self, log2_M: usize) -> MultilinearPolyTerms<F> {
         let remainder = NUM_BITS % log2_M;
         let rem_init = PolyExpr::Var(0);
@@ -97,7 +95,28 @@ impl<F: PrimeField, E: ExtensionField<F>, const NUM_BITS: usize>
             let term = PolyExpr::Prod(vec![coeff, x]);
             rem_terms.push(term);
         });
-        MultilinearPolyTerms::new(remainder, PolyExpr::Sum(rem_terms))
+
+        let mut other_terms = vec![];
+
+        (remainder..log2_M).for_each(|i| {
+            let x = PolyExpr::Var(i);
+            let x_neg = PolyExpr::Prod(vec![PolyExpr::Const(F::ZERO - F::ONE), x]);
+            let term = PolyExpr::Sum(vec![
+                PolyExpr::Const(F::ONE),
+                x_neg,
+            ]);
+            other_terms.push(term);
+        });
+        MultilinearPolyTerms::new(
+            log2_M,
+            PolyExpr::Prod([vec![PolyExpr::Sum(rem_terms)], other_terms].concat()),
+        )
+    }
+}
+
+impl<F, E, const NUM_BITS: usize> ReminderSubtable<F, E, NUM_BITS> {
+    pub fn new() -> Self {
+        Self(PhantomData)
     }
 }
 
@@ -127,20 +146,22 @@ impl<const NUM_BITS: usize> LookupType for RangeStategy<NUM_BITS> {
         Expression::distribute_powers(expressions, E::from_bases(&[F::from(M as u64)]))
     }
 
+    // SubtableIndices map subtable to memories
     fn subtables<F: PrimeField, E: ExtensionField<F>>(
         &self,
         C: usize,
         M: usize,
     ) -> Vec<(Box<dyn LassoSubtable<F, E>>, SubtableIndices)> {
-        let full = Box::new(FullLimbSubtable::<F, E>(PhantomData));
-        let log_m = M.ilog2() as usize;
-        if NUM_BITS % log_m == 0 {
-            vec![(full, SubtableIndices::from(0..C))]
+        let full = Box::new(FullLimbSubtable::<F, E>::new());
+        let log_M = M.ilog2() as usize;
+        let num_chunks = NUM_BITS / log_M;
+        if NUM_BITS % log_M == 0 {
+            vec![(full, SubtableIndices::from(0..num_chunks))]
         } else {
-            let rem = Box::new(ReminderSubtable::<F, E, NUM_BITS>(PhantomData));
+            let rem = Box::new(ReminderSubtable::<F, E, NUM_BITS>::new());
             vec![
-                (full, SubtableIndices::from(0..C)),
-                (rem, SubtableIndices::from(0..C)),
+                (full, SubtableIndices::from(0..num_chunks)),
+                (rem, SubtableIndices::from(num_chunks)),
             ]
         }
     }
