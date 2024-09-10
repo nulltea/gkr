@@ -15,6 +15,7 @@ use crate::{
 pub mod range;
 
 pub type SubtableId = TypeId;
+pub type LookupId = TypeId;
 
 #[enum_dispatch]
 pub trait LassoSubtable<F: PrimeField, E: ExtensionField<F>>: 'static + Sync + Debug {
@@ -57,6 +58,11 @@ pub trait CircuitLookups:
 
 #[enum_dispatch]
 pub trait LookupType: Clone + Send + Sync {
+    // /// Returns the TypeId of this lookup type.
+    // fn lookup_id(&self) -> LookupId {
+    //     TypeId::of::<Self>()
+    // }
+
     /// The `g` function that computes T[r] = g(T_1[r_1], ..., T_k[r_1], T_{k+1}[r_2], ..., T_{\alpha}[r_c])
     fn combine_lookups<F: PrimeField>(&self, operands: &[F], C: usize, M: usize) -> F;
 

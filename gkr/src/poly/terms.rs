@@ -2,13 +2,13 @@ use ff_ext::{ff::Field, ExtensionField};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 /// Multilinear polynomials are represented as expressions
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MultilinearPolyTerms<F> {
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MultilinearPolyTerms<F: Field> {
     num_vars: usize,
     expression: PolyExpr<F>,
 }
 
-impl<F> MultilinearPolyTerms<F> {
+impl<F: Field> MultilinearPolyTerms<F> {
     pub fn new(num_vars: usize, expression: PolyExpr<F>) -> Self {
         Self {
             num_vars,
@@ -52,5 +52,11 @@ impl<F: Field> PolyExpr<F> {
                 .reduce(|| E::ONE, |acc, f| acc * f),
             PolyExpr::Pow(inner, e) => inner.evaluate(x).pow([*e as u64]),
         }
+    }
+}
+
+impl<F: Default> Default for PolyExpr<F> {
+    fn default() -> Self {
+        PolyExpr::Const(F::default())
     }
 }

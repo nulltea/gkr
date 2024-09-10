@@ -39,6 +39,15 @@ impl<F: PrimeField> DensePolynomial<F, Vec<F>> {
                 .collect::<Vec<F>>(),
         )
     }
+
+
+    pub fn from_u64<E: ExtensionField<F>>(z: &[u64]) -> BoxMultilinearPoly<'static, F, E> {
+        box_dense_poly(
+            (0..z.len())
+                .map(|i| F::from(z[i]))
+                .collect::<Vec<F>>(),
+        )
+    }
 }
 
 impl<F: Field> DensePolynomial<F, Vec<F>> {

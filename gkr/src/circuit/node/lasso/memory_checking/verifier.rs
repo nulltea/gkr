@@ -1,6 +1,6 @@
 use std::{collections::HashMap, iter, marker::PhantomData};
 
-use ff_ext::{ff::PrimeField, ExtensionField};
+use ff_ext::{ff::{Field, PrimeField}, ExtensionField};
 use itertools::{chain, izip, Itertools};
 
 use plonkish_backend::{pcs::Evaluation, poly::multilinear::MultilinearPolynomialTerms};
@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct Chunk<F> {
+pub struct Chunk<F: Field> {
     chunk_index: usize,
     chunk_bits: usize,
     pub(crate) memory: Vec<Memory<F>>,
@@ -59,6 +59,7 @@ impl<F: PrimeField> Chunk<F> {
             .collect_vec()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_memories<E: ExtensionField<F>>(
         &self,
         read_xs: &[E],
@@ -74,9 +75,7 @@ impl<F: PrimeField> Chunk<F> {
         let e_poly_xs = transcript.read_felts_as_exts(self.num_memories())?;
         let id_poly_y = inner_product(
             iter::successors(Some(E::ONE), |power_of_two| Some(power_of_two.double()))
-                .take(y.len())
-                .collect_vec()
-                .into_iter(),
+                .take(y.len()),
             y.to_vec(),
         );
         self.memory.iter().enumerate().for_each(|(i, memory)| {
@@ -97,12 +96,12 @@ impl<F: PrimeField> Chunk<F> {
 }
 
 #[derive(Debug)]
-pub struct Memory<F> {
+pub struct Memory<F: Field> {
     memory_index: usize,
     subtable_poly: MultilinearPolyTerms<F>,
 }
 
-impl<F> Memory<F> {
+impl<F: Field> Memory<F> {
     pub fn new(memory_index: usize, subtable_poly: MultilinearPolyTerms<F>) -> Self {
         Self {
             memory_index,
@@ -130,14 +129,9 @@ impl<'a, F: PrimeField, E: ExtensionField<F>> MemoryCheckingVerifier<F, E> {
 
     pub fn verify(
         &self,
-        // num_chunks: usize,
         num_reads: usize,
-        // polys_offset: usize,
-        // points_offset: usize,
         gamma: &E,
         tau: &E,
-        // lookup_opening_points: &mut Vec<Vec<F>>,
-        // lookup_opening_evals: &mut Vec<Evaluation<F>>,
         transcript: &mut dyn TranscriptRead<F, E>,
     ) -> Result<(), Error> {
         let num_memories: usize = self.chunks.iter().map(|chunk| chunk.num_memories()).sum();
