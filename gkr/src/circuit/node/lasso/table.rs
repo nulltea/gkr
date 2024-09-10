@@ -3,12 +3,11 @@ use std::{any::TypeId, fmt::Debug};
 use enum_dispatch::enum_dispatch;
 use ff_ext::{ff::PrimeField, ExtensionField};
 use fixedbitset::FixedBitSet;
-use plonkish_backend::poly::multilinear::MultilinearPolynomialTerms;
 use std::ops::Range;
 use strum::{EnumCount, IntoEnumIterator};
 
 use crate::{
-    poly::{BoxMultilinearPoly, BoxMultilinearPolyOwned, MultilinearPolyTerms},
+    poly::MultilinearPolyTerms,
     util::expression::Expression,
 };
 

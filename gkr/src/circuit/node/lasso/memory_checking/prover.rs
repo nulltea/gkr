@@ -1,4 +1,3 @@
-use core::num;
 use std::{array, iter};
 
 use ff_ext::{

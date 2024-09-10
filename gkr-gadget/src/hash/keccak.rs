@@ -593,7 +593,7 @@ pub mod test {
         poly::MultilinearPoly,
         util::{
             arithmetic::{try_felt_to_bool, ExtensionField, Field, PrimeField},
-            dev::{rand_bytes, rand_range, seeded_std_rng},
+            dev::{rand_bytes, seeded_std_rng},
             RngCore,
         },
     };

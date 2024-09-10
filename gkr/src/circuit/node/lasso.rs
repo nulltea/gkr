@@ -1,17 +1,17 @@
 use crate::{
-    circuit::node::{CombinedEvalClaim, EvalClaim, Node, VanillaNode},
+    circuit::node::{CombinedEvalClaim, EvalClaim, Node},
     izip_par,
     poly::{
-        box_dense_poly, merge, BoxMultilinearPoly, DensePolynomial, MultilinearPoly,
+        box_dense_poly, BoxMultilinearPoly, DensePolynomial, MultilinearPoly,
         MultilinearPolyTerms,
     },
     sum_check::{
-        err_unmatched_evaluation, generic::Generic, prove_sum_check, verify_sum_check,
+        generic::Generic, prove_sum_check, verify_sum_check,
         SumCheckFunction, SumCheckPoly,
     },
     transcript::{Transcript, TranscriptRead, TranscriptWrite},
     util::{
-        arithmetic::{div_ceil, ExtensionField, Field},
+        arithmetic::{ExtensionField, Field},
         chain,
         expression::Expression,
         izip, Itertools,
@@ -22,40 +22,22 @@ use ark_std::{iterable::Iterable, log2};
 use ff_ext::ff::PrimeField;
 use memory_checking::{Chunk, Memory, MemoryCheckingProver};
 use plonkish_backend::{
-    backend::lookup,
     pcs::PolynomialCommitmentScheme,
-    poly::multilinear::{MultilinearPolynomial, MultilinearPolynomialTerms},
-    util::{
-        arithmetic::{fe_to_bits_le, usize_from_bits_le},
-        parallel::{num_threads, parallelize_iter},
-    },
+    poly::multilinear::MultilinearPolynomial,
+    util::arithmetic::{fe_to_bits_le, usize_from_bits_le},
 };
-// use prover::LassoProver;
 use rayon::prelude::*;
 use std::{
-    any::TypeId,
-    array::{self, from_fn},
-    cmp::Ordering::*,
     collections::HashMap,
     iter,
     marker::PhantomData,
-    ops::Index,
-    slice::Chunks,
 };
 use strum::{EnumCount, IntoEnumIterator};
-use table::{CircuitLookups, LassoSubtable, LookupType, SubtableId, SubtableIndices, SubtableSet};
-// use verifier::LassoVerifier;
+use table::{CircuitLookups, LassoSubtable, LookupType, SubtableIndices, SubtableSet};
 
 pub mod memory_checking;
-// pub mod test;
 pub mod table;
-// pub mod verifier;
 
-#[derive(Clone, Debug)]
-pub struct GeneralizedLasso<F: Field, Pcs: PolynomialCommitmentScheme<F>>(
-    PhantomData<F>,
-    PhantomData<Pcs>,
-);
 
 #[derive(Debug)]
 pub struct LassoNode<F: Field, E, Lookups: CircuitLookups, const C: usize, const M: usize> {
@@ -687,45 +669,44 @@ pub mod test {
     use crate::{
         circuit::{
             node::{
-                input::InputNode, lasso::LassoLookupsPreprocessing, log_up::LogUpNode,
-                range::RangeTable, VanillaGate, VanillaNode,
+                input::InputNode, lasso::LassoLookupsPreprocessing,
             },
             test::{run_circuit, TestData},
             Circuit,
         },
         poly::{
-            box_dense_poly, box_owned_dense_poly, BoxMultilinearPoly, BoxMultilinearPolyOwned,
-            MultilinearPolyTerms, PolyExpr,
+            box_dense_poly,
+            MultilinearPolyTerms,
         },
         util::{
-            arithmetic::{div_ceil, inner_product, ExtensionField, Field},
+            arithmetic::ExtensionField,
             chain,
-            dev::{rand_range, rand_vec, seeded_std_rng, std_rng},
+            dev::std_rng,
             expression::Expression,
-            Itertools, RngCore,
+            Itertools,
         },
     };
-    use core::num;
+    
     use enum_dispatch::enum_dispatch;
     use ff_ext::ff::PrimeField;
-    use goldilocks::{Goldilocks, GoldilocksExt2};
-    use num_integer::Integer;
+    use goldilocks::Goldilocks;
+    
     use plonkish_backend::{
         pcs::multilinear::MultilinearBrakedown,
-        util::{code::BrakedownSpec6, Deserialize, DeserializeOwned, Serialize},
+        util::{code::BrakedownSpec6, DeserializeOwned, Serialize},
     };
-    use rayon::vec;
-    use std::{iter, marker::PhantomData};
+    
+    use std::iter;
 
     use super::{
         table::{
             range::{FullLimbSubtable, RangeStategy, ReminderSubtable},
-            CircuitLookups, LassoSubtable, LookupId, LookupType, SubtableIndices, SubtableSet,
+            CircuitLookups, LassoSubtable, LookupType, SubtableIndices, SubtableSet,
         },
         LassoNode,
     };
     use crate::circuit::node::SubtableId;
-    use halo2_curves::bn256;
+    
     use rand::Rng;
     use std::any::TypeId;
     use strum_macros::{EnumCount, EnumIter};
@@ -793,7 +774,7 @@ pub mod test {
         const N: usize,
     >(
         num_vars: usize,
-        mut rng: &mut impl Rng,
+        rng: &mut impl Rng,
     ) -> TestData<F, E> {
         const C: usize = 8;
         const M: usize = 1 << 16;

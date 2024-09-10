@@ -1,19 +1,15 @@
-use std::{collections::HashMap, iter, marker::PhantomData};
+use std::{iter, marker::PhantomData};
 
 use ff_ext::{
     ff::{Field, PrimeField},
     ExtensionField,
 };
-use itertools::{chain, izip, Itertools};
+use itertools::{izip, Itertools};
 
-use plonkish_backend::{pcs::Evaluation, poly::multilinear::MultilinearPolynomialTerms};
 
 use crate::{
-    circuit::node::{
-        lasso::{memory_checking::MemoryCheckingProver, LassoLookupsPreprocessing},
-        SubtableSet,
-    },
-    poly::{BoxMultilinearPoly, MultilinearPolyTerms},
+    circuit::node::lasso::memory_checking::MemoryCheckingProver,
+    poly::MultilinearPolyTerms,
     sum_check::verify_sum_check,
     transcript::TranscriptRead,
     util::arithmetic::inner_product,

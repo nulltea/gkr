@@ -1,13 +1,12 @@
 use std::{iter, marker::PhantomData};
 
 use ff_ext::{ff::PrimeField, ExtensionField};
-use itertools::{izip, Itertools};
-use plonkish_backend::util::arithmetic::split_by_chunk_bits;
+use itertools::Itertools;
 
 use crate::{
-    poly::{box_dense_poly, BoxMultilinearPoly, MultilinearPolyTerms, PolyExpr},
+    poly::{MultilinearPolyTerms, PolyExpr},
     util::{
-        arithmetic::{div_ceil, inner_product},
+        arithmetic::inner_product,
         expression::Expression,
     },
 };

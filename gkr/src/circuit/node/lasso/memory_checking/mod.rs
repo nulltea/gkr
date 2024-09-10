@@ -5,7 +5,6 @@ use ff_ext::{ff::PrimeField, ExtensionField};
 use itertools::{chain, Itertools};
 pub use prover::MemoryCheckingProver;
 
-use plonkish_backend::poly::multilinear::MultilinearPolynomial;
 
 use crate::poly::BoxMultilinearPoly;
 
