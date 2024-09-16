@@ -10,13 +10,11 @@ mod fft;
 mod input;
 mod log_up;
 mod vanilla;
-mod lasso;
 
 pub use fft::FftNode;
 pub use input::InputNode;
 pub use log_up::LogUpNode;
 pub use vanilla::{VanillaGate, VanillaNode};
-pub use lasso::{LassoNode, table::*};
 
 #[auto_impl::auto_impl(&, Box)]
 pub trait Node<F, E>: Debug {
