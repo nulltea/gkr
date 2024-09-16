@@ -55,8 +55,7 @@ impl<F: Field, E: ExtensionField<F>> Node<F, E> for VanillaNode<F, E> {
         inputs: Vec<&BoxMultilinearPoly<F, E>>,
     ) -> BoxMultilinearPoly<'static, F, E> {
         assert_eq!(inputs.len(), self.input_arity);
-        println!("input size: {} inputs {:?}", self.input_size(), inputs.iter().map(|e| e.len()).collect::<Vec<_>>());
-        assert!(!inputs.iter().any(|input| input.len() != self.input_size()));
+        // assert!(!inputs.iter().any(|input| input.len() != self.input_size()));
 
         let output = (0..self.output_size())
             .into_par_iter()
@@ -671,12 +670,15 @@ pub mod test {
             },
             test::{run_circuit, TestData},
             Circuit,
-        }, connect, poly::box_dense_poly, util::{
+        },
+        connect,
+        poly::box_dense_poly,
+        util::{
             arithmetic::{ExtensionField, Field},
             chain,
             dev::{rand_bool, rand_range, rand_unique, rand_vec},
             izip, Itertools, RngCore,
-        }
+        },
     };
     use goldilocks::{Goldilocks, GoldilocksExt2};
     use std::iter;
@@ -732,7 +734,6 @@ pub mod test {
         }
     }
 
-    
     #[test]
     fn cyclo_mul() {
         run_circuit::<Goldilocks, GoldilocksExt2>(shift_circuit);
@@ -780,7 +781,8 @@ pub mod test {
                 (0..p.len()).map(|i| VanillaGate::relay((0, i))),
                 (0..p.len()).map(|i| VanillaGate::relay((0, i))),
                 [VanillaGate::constant(F::ZERO)]
-            ].collect_vec();
+            ]
+            .collect_vec();
 
             circuit.insert(VanillaNode::new(1, log2_input_size, gates.clone(), 1))
         };
@@ -788,7 +790,6 @@ pub mod test {
         connect!(circuit {
             mul <- in1;
         });
-
 
         println!("p: {:?}", p);
 

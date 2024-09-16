@@ -46,14 +46,11 @@ impl<F: Field, E: ExtensionField<F>> Circuit<F, E> {
     ) -> Vec<BoxMultilinearPoly<'a, F, E>> {
         let mut values = Vec::from_iter(iter::repeat_with(|| None).take(self.nodes().len()));
 
-        println!("inputs nodes: {:?} inputs {}", self.inputs().count(), inputs.len());
-
         izip_eq!(self.inputs(), inputs).for_each(|(idx, input)| values[idx] = input.into());
         self.topo_iter()
             .filter(|(_, node)| !node.is_input())
             .for_each(|(idx, node)| {
                 let inputs = self.predec(idx).map(|i| values[i].as_ref().unwrap());
-                println!("idx: {idx}");
                 values[idx] = node.evaluate(inputs.collect()).into()
             });
 
@@ -108,9 +105,10 @@ pub(super) mod test {
         f: impl Fn(usize, &mut StdRng) -> TestData<F, E>,
     ) {
         let mut rng = seeded_std_rng();
-        for num_vars in 2..3 {
+        for num_vars in 8..10 {
             let (circuit, inputs, expected_values) = f(num_vars, &mut rng);
             let values = circuit.evaluate(inputs);
+            // println!("values: {:?}", values);
             if let Some(expected_values) = expected_values {
                 assert_polys_eq(&values, &expected_values);
             }

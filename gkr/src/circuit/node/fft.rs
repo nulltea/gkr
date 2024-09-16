@@ -66,6 +66,7 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for FftNode<F, E> {
         box_dense_poly(value)
     }
 
+    #[tracing::instrument(skip_all, name = "FftNode::prove_claim_reduction")]
     fn prove_claim_reduction<'a>(
         &self,
         claim: CombinedEvalClaim<E>,
@@ -98,6 +99,7 @@ impl<F: PrimeField, E: ExtensionField<F>> Node<F, E> for FftNode<F, E> {
         Ok(vec![vec![EvalClaim::new(r_x, input_r_x)]])
     }
 
+    #[tracing::instrument(skip_all, name = "FftNode::verify_claim_reduction")]
     fn verify_claim_reduction(
         &self,
         claim: CombinedEvalClaim<E>,

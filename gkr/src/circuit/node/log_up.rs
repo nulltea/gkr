@@ -42,6 +42,7 @@ impl<F: Field, E: ExtensionField<F>> Node<F, E> for LogUpNode {
         box_dense_poly([F::ZERO])
     }
 
+    #[tracing::instrument(skip_all, name = "LogUpNode::prove_claim_reduction")]
     fn prove_claim_reduction(
         &self,
         _: CombinedEvalClaim<E>,
@@ -236,6 +237,7 @@ impl<F: Field, E: ExtensionField<F>> Node<F, E> for LogUpNode {
         .collect())
     }
 
+    #[tracing::instrument(skip_all, name = "LogUpNode::verify_claim_reduction")]
     fn verify_claim_reduction(
         &self,
         _: CombinedEvalClaim<E>,

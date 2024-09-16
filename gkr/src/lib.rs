@@ -37,7 +37,9 @@ pub fn prove_gkr<F: Field, E: ExtensionField<F>>(
 ) -> Result<Vec<Vec<EvalClaim<E>>>, Error> {
     circuit
         .topo_iter()
-        .for_each(|(idx, node)| assert_eq!(values[idx].len(), node.output_size()));
+        .for_each(|(idx, node)| {
+            assert_eq!(values[idx].len(), node.output_size())
+        });
 
     if cfg!(feature = "sanity-check") {
         izip_eq!(circuit.outputs(), output_claims).for_each(|(idx, claim)| {
@@ -58,7 +60,6 @@ pub fn prove_gkr<F: Field, E: ExtensionField<F>>(
         let inputs = circuit.predec(idx).map(|idx| &values[idx]).collect();
         let sub_claims = node.prove_claim_reduction(claim, inputs, transcript)?;
 
-        println!("idx {idx} sub_claims: {:?} predec {}", sub_claims.len(), circuit.predec(idx).count());
         izip_eq!(circuit.predec(idx), sub_claims)
             .for_each(|(idx, sub_claims)| claims[idx].extend(sub_claims));
     }
