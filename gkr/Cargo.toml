@@ -11,12 +11,21 @@ itertools = { workspace = true }
 rand_core = { workspace = true }
 rand_chacha = { workspace = true }
 rand = { workspace = true, optional = true }
+plonkish_backend = { workspace = true }
+strum = "0.26.0"
+enum_dispatch = "0.3.12"
+fixedbitset = "0.5"
+tracing = "0.1.40"
+ark-std = { version = "0.4.0" }
+
 
 [dev-dependencies]
 rand = { workspace = true }
 criterion = { workspace = true }
 goldilocks = { workspace = true }
 halo2_curves = { workspace = true }
+num-integer = "0.1.45"
+strum_macros = "0.26.4"
 
 [features]
 default = []

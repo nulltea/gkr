@@ -37,7 +37,9 @@ pub fn prove_gkr<F: Field, E: ExtensionField<F>>(
 ) -> Result<Vec<Vec<EvalClaim<E>>>, Error> {
     circuit
         .topo_iter()
-        .for_each(|(idx, node)| assert_eq!(values[idx].len(), node.output_size()));
+        .for_each(|(idx, node)| {
+            assert_eq!(values[idx].len(), node.output_size())
+        });
 
     if cfg!(feature = "sanity-check") {
         izip_eq!(circuit.outputs(), output_claims).for_each(|(idx, claim)| {

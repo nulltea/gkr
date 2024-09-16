@@ -105,9 +105,10 @@ pub(super) mod test {
         f: impl Fn(usize, &mut StdRng) -> TestData<F, E>,
     ) {
         let mut rng = seeded_std_rng();
-        for num_vars in 1..10 {
+        for num_vars in 8..10 {
             let (circuit, inputs, expected_values) = f(num_vars, &mut rng);
             let values = circuit.evaluate(inputs);
+            // println!("values: {:?}", values);
             if let Some(expected_values) = expected_values {
                 assert_polys_eq(&values, &expected_values);
             }

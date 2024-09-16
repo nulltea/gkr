@@ -1,3 +1,5 @@
+use ff_ext::ff::PrimeField;
+
 use crate::{
     poly::{
         evaluate, merge, merge_last, merge_last_in_place, BoxMultilinearPoly,
@@ -8,13 +10,13 @@ use crate::{
 use std::{fmt::Debug, marker::PhantomData, ops::Index};
 
 #[derive(Clone, Debug)]
-pub struct DenseMultilinearPoly<F, S: AsRef<[F]>> {
+pub struct DensePolynomial<F, S: AsRef<[F]>> {
     evals: S,
     num_vars: usize,
     _marker: PhantomData<F>,
 }
 
-impl<F, S: AsRef<[F]>> DenseMultilinearPoly<F, S> {
+impl<F, S: AsRef<[F]>> DensePolynomial<F, S> {
     pub fn new(evals: S) -> Self {
         let num_vars = evals.as_ref().len().ilog2() as usize;
         assert_eq!(evals.as_ref().len(), 1 << num_vars);
@@ -27,13 +29,34 @@ impl<F, S: AsRef<[F]>> DenseMultilinearPoly<F, S> {
     }
 }
 
-impl<F: Field> DenseMultilinearPoly<F, Vec<F>> {
+impl<F: PrimeField> DensePolynomial<F, Vec<F>> {
+    pub fn from_usize<E: ExtensionField<F>>(
+        z: &[usize],
+    ) -> BoxMultilinearPoly<'static, F, E> {
+        box_dense_poly(
+            (0..z.len())
+                .map(|i| F::from(z[i] as u64))
+                .collect::<Vec<F>>(),
+        )
+    }
+
+
+    pub fn from_u64<E: ExtensionField<F>>(z: &[u64]) -> BoxMultilinearPoly<'static, F, E> {
+        box_dense_poly(
+            (0..z.len())
+                .map(|i| F::from(z[i]))
+                .collect::<Vec<F>>(),
+        )
+    }
+}
+
+impl<F: Field> DensePolynomial<F, Vec<F>> {
     pub(crate) fn box_owned<'a>(self) -> BoxMultilinearPolyOwned<'a, F> {
         Box::new(self)
     }
 }
 
-impl<F, S: AsRef<[F]>> Index<usize> for DenseMultilinearPoly<F, S> {
+impl<F, S: AsRef<[F]>> Index<usize> for DensePolynomial<F, S> {
     type Output = F;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -42,7 +65,7 @@ impl<F, S: AsRef<[F]>> Index<usize> for DenseMultilinearPoly<F, S> {
 }
 
 impl<F: Field, E: ExtensionField<F>, S: Clone + Debug + AsRef<[F]> + Send + Sync>
-    MultilinearPoly<F, E> for DenseMultilinearPoly<F, S>
+    MultilinearPoly<F, E> for DensePolynomial<F, S>
 {
     fn clone_box(&self) -> BoxMultilinearPoly<F, E> {
         self.clone().boxed()
@@ -71,7 +94,7 @@ impl<F: Field, E: ExtensionField<F>, S: Clone + Debug + AsRef<[F]> + Send + Sync
     }
 }
 
-impl<F: Field> MultilinearPolyOwned<F> for DenseMultilinearPoly<F, Vec<F>> {
+impl<F: Field> MultilinearPolyOwned<F> for DensePolynomial<F, Vec<F>> {
     fn fix_var_in_place(&mut self, x_i: &F) {
         self.num_vars -= 1;
         self.evals = merge(&self.evals, x_i);
@@ -89,14 +112,14 @@ where
     E: ExtensionField<F>,
     S: 'a + Clone + Debug + AsRef<[F]> + Send + Sync,
 {
-    DenseMultilinearPoly::new(evals).boxed()
+    DensePolynomial::new(evals).boxed()
 }
 
 pub fn box_owned_dense_poly<'a, F>(evals: Vec<F>) -> BoxMultilinearPolyOwned<'a, F>
 where
     F: Field,
 {
-    DenseMultilinearPoly::new(evals).box_owned()
+    DensePolynomial::new(evals).box_owned()
 }
 
 pub fn repeated_dense_poly<'a, F, E, S>(evals: S, log2_reps: usize) -> BoxMultilinearPoly<'a, F, E>
@@ -105,5 +128,5 @@ where
     E: ExtensionField<F>,
     S: 'a + Clone + Debug + AsRef<[F]> + Send + Sync,
 {
-    DenseMultilinearPoly::new(evals).repeated(log2_reps).boxed()
+    DensePolynomial::new(evals).repeated(log2_reps).boxed()
 }

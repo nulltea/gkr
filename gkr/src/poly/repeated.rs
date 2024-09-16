@@ -1,6 +1,6 @@
 use crate::{
     poly::{
-        box_owned_dense_poly, BoxMultilinearPoly, BoxMultilinearPolyOwned, DenseMultilinearPoly,
+        box_owned_dense_poly, BoxMultilinearPoly, BoxMultilinearPolyOwned, DensePolynomial,
         MultilinearPoly, MultilinearPolyExt, MultilinearPolyOwned,
     },
     util::arithmetic::{ExtensionField, Field},
@@ -86,7 +86,7 @@ where
                 .with_min_len(64)
                 .map(|b| E::from(self.inner[b]))
                 .collect::<Vec<_>>();
-            DenseMultilinearPoly::new(evals)
+            DensePolynomial::new(evals)
                 .repeated(self.log2_reps - 1)
                 .box_owned()
         }
@@ -122,4 +122,4 @@ macro_rules! impl_multi_poly_owned {
 }
 
 impl_multi_poly_owned!(BoxMultilinearPolyOwned<'static, F>);
-impl_multi_poly_owned!(DenseMultilinearPoly<F, Vec<F>>);
+impl_multi_poly_owned!(DensePolynomial<F, Vec<F>>);
